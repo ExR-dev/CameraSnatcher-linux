@@ -99,10 +99,10 @@ Color_HSV rgba_to_hsv(Color_RGBA rgb)
         g = rgb.G / 255.0, 
         b = rgb.B / 255.0;
 
-    double cmax = MAX(r, MAX(g, b)); // maximum of r, g, b
-    double cmin = MIN(r, MIN(g, b)); // minimum of r, g, b
+    double cmax = MAX(r, MAX(g, b));
+    double cmin = MIN(r, MIN(g, b));
 
-    double diff = cmax - cmin; // diff of cmax and cmin.
+    double diff = cmax - cmin;
 
     double h, s, v;
 
