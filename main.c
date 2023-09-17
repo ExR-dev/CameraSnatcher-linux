@@ -25,9 +25,9 @@
 
 
 //#define COL_MANIP_OVERWRITE_CAM
-#define COL_MANIP_MASK_REDS
-#define COL_MANIP_ADD_RECTS
-//#define COL_MANIP_ADD_CIRCLE
+//#define COL_MANIP_MASK_REDS
+//#define COL_MANIP_ADD_RECTS
+#define COL_MANIP_ADD_CIRCLE
 
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -51,10 +51,10 @@
 
 typedef struct AABB
 {
-    unsigned short n;
-    unsigned short e;
-    unsigned short s;
-    unsigned short w;
+    unsigned short n; // The y-value of the boxes northern edge.
+    unsigned short e; // The x-value of the boxes eastern edge.
+    unsigned short s; // The y-value of the boxes southern edge.
+    unsigned short w; // The x-value of the boxes western edge.
 } AABB;
 
 bool AABB_intersect(AABB box1, AABB box2)
@@ -79,60 +79,52 @@ AABB AABB_combine(AABB box1, AABB box2)
 
 typedef struct Color_RGBA
 {
-    __uint8_t R;
-    __uint8_t G;
-    __uint8_t B;
-    __uint8_t A;
+    unsigned char R;
+    unsigned char G;
+    unsigned char B;
+    unsigned char A;
 } Color_RGBA;
 
 typedef struct Color_HSV
 {
-    double H;
-    double S;
-    double V;
+    float H; // Hue (0-360)
+    float S; // Saturation (0-100)
+    float V; // Value (0-100)
 } Color_HSV;
 
 Color_HSV rgba_to_hsv(Color_RGBA rgb) 
 {
-    double 
-        r = rgb.R / 255.0, 
-        g = rgb.G / 255.0, 
-        b = rgb.B / 255.0;
+    float 
+        r = rgb.R / 255.0f, 
+        g = rgb.G / 255.0f, 
+        b = rgb.B / 255.0f;
 
-    double cmax = MAX(r, MAX(g, b));
-    double cmin = MIN(r, MIN(g, b));
+    float max = MAX(r, MAX(g, b));
+    float min = MIN(r, MIN(g, b));
+    float diff = max - min;
 
-    double diff = cmax - cmin;
+    float h, s, v;
 
-    double h, s, v;
+    if (max == min)
+       h = 0.0f;
+    else if (max == r)
+       h = fmodf((60.0f * ((g - b) / diff) + 360.0f), 360.0f);
+    else if (max == g)
+       h = fmodf((60.0f * ((b - r) / diff) + 120.0f), 360.0f);
+    else if (max == b)
+       h = fmodf((60.0f * ((r - g) / diff) + 240.0f), 360.0f);
 
-    if (cmax == cmin)
-       h = 0.0;
-    else if (cmax == r)
-       h = fmod((60.0 * ((g - b) / diff) + 360.0), 360.0);
-    else if (cmax == g)
-       h = fmod((60.0 * ((b - r) / diff) + 120.0), 360.0);
-    else if (cmax == b)
-       h = fmod((60.0 * ((r - g) / diff) + 240.0), 360.0);
-
-    if (cmax == 0.0)
-        s = 0.0;
-    else
-        s = (diff / cmax) * 100.0;
-
-    v = cmax * 100.0;
+    s = (max == 0.0f) ? (0.0f) : ((diff / max) * 100.0f);
+    v = max * 100.0f;
 
     return (Color_HSV){.H = h, .S = s, .V = v};
 }
 
 Color_RGBA hsv_to_rgba(Color_HSV hsv)
 {
-    double 
-        r = 0.0, 
-        g = 0.0, 
-        b = 0.0;
+    float r = 0.0f, g = 0.0f, b = 0.0f;
 
-	if (hsv.S == 0.0)
+	if (hsv.S == 0.0f)
 	{
 		r = hsv.V;
 		g = hsv.V;
@@ -141,19 +133,19 @@ Color_RGBA hsv_to_rgba(Color_HSV hsv)
 	else
 	{
 		int i;
-		double f, p, q, t;
+		float f, p, q, t;
 
-		if (hsv.H == 360.0)
-			hsv.H = 0.0;
+		if (hsv.H == 360.0f)
+			hsv.H = 0.0f;
 		else
-			hsv.H = hsv.H / 60.0;
+			hsv.H = hsv.H / 60.0f;
 
 		i = (int)trunc(hsv.H);
 		f = hsv.H - i;
 
-		p = hsv.V * (1.0 - hsv.S);
-		q = hsv.V * (1.0 - (hsv.S * f));
-		t = hsv.V * (1.0 - (hsv.S * (1.0 - f)));
+		p = hsv.V * (1.0f - hsv.S);
+		q = hsv.V * (1.0f - (hsv.S * f));
+		t = hsv.V * (1.0f - (hsv.S * (1.0f - f)));
 
 		switch (i)
 		{
@@ -197,9 +189,9 @@ Color_RGBA hsv_to_rgba(Color_HSV hsv)
 	}
 
 	Color_RGBA rgba = {
-        .R = (r * 255.0),
-        .G = (g * 255.0),
-        .B = (b * 255.0),
+        .R = (r * 255.0f),
+        .G = (g * 255.0f),
+        .B = (b * 255.0f),
         .A = 255
     };
 
@@ -210,8 +202,8 @@ Color_RGBA hsv_to_rgba(Color_HSV hsv)
 typedef struct Capture_Data
 {
     int handle;
-    __uint8_t file_id;
-    __uint8_t* img_mem[2];
+    unsigned char file_id;
+    (unsigned char)* img_mem[2];
 
     struct v4l2_format format;
     struct v4l2_requestbuffers buffer_request;
@@ -225,12 +217,12 @@ typedef struct Capture_Data
 /// @brief Debug function for getting the name associated with a given output from v4l2_fourcc() in videodev2.h.
 /// @param code A number outputted from v4l2_fourcc().
 /// @param out The four letter string that makes v4l2_fourcc() output code.
-void _get_v4l2_code_name(__uint8_t code, __uint8_t* out) 
+void _get_v4l2_code_name(unsigned char code, (unsigned char)* out) 
 {
-    out[0] = (__uint8_t)((code) - ((code >> 8) << 8));
-    out[1] = (__uint8_t)((code >> 8) - ((code >> 16) << 8));
-    out[2] = (__uint8_t)((code >> 16) - ((code >> 24) << 8));
-    out[3] = (__uint8_t)(code >> 24);
+    out[0] = (unsigned char)((code) - ((code >> 8) << 8));
+    out[1] = (unsigned char)((code >> 8) - ((code >> 16) << 8));
+    out[2] = (unsigned char)((code >> 16) - ((code >> 24) << 8));
+    out[3] = (unsigned char)(code >> 24);
     out[4] = '\0';
 }
 #endif
@@ -249,24 +241,24 @@ typedef my_source_mgr * my_src_ptr;
 
 static void jpg_memInitSource(j_decompress_ptr cinfo)
 {
-    my_src_ptr src = (my_src_ptr) cinfo->src;
+    my_src_ptr src = (my_src_ptr)cinfo->src;
     src->start_of_file = TRUE;
 }
 
 static boolean jpg_memFillInputBuffer(j_decompress_ptr cinfo)
 {
-    my_src_ptr src = (my_src_ptr) cinfo->src;
+    my_src_ptr src = (my_src_ptr)cinfo->src;
     src->start_of_file = FALSE;
     return TRUE;
 }
 
 static void jpg_memSkipInputData(j_decompress_ptr cinfo, long num_bytes)
 {
-    my_src_ptr src = (my_src_ptr) cinfo->src;
+    my_src_ptr src = (my_src_ptr)cinfo->src;
     if (num_bytes > 0) 
     {
-        src->pub.next_input_byte += (size_t) num_bytes;
-        src->pub.bytes_in_buffer -= (size_t) num_bytes;
+        src->pub.next_input_byte += (size_t)num_bytes;
+        src->pub.bytes_in_buffer -= (size_t)num_bytes;
     }
 }
 
@@ -274,8 +266,8 @@ static void jpg_memTermSource(j_decompress_ptr cinfo) { }
 
 void mjpeg_to_rgba(Capture_Data* data, Color_RGBA* rgba)
 {
-    __uint8_t* mjpeg = data->img_mem[data->queue_buffer.index];
-    __uint8_t rgb[IMG_SIZE * 3];
+    (unsigned char)* mjpeg = data->img_mem[data->queue_buffer.index];
+    unsigned char rgb[IMG_SIZE * 3];
     int size = data->queue_buffer.bytesused;
 
     struct jpeg_decompress_struct cinfo;
@@ -291,7 +283,7 @@ void mjpeg_to_rgba(Capture_Data* data, Color_RGBA* rgba)
         sizeof(my_source_mgr)
         );
     
-    src = (my_src_ptr) cinfo.src;
+    src = (my_src_ptr)cinfo.src;
     src->buffer = (JOCTET*)mjpeg;
 
     src->pub.init_source = jpg_memInitSource;
@@ -305,7 +297,7 @@ void mjpeg_to_rgba(Capture_Data* data, Color_RGBA* rgba)
     jpeg_read_header(&cinfo, TRUE);
     jpeg_start_decompress(&cinfo);
 
-    __uint8_t* rgb_ptr = (__uint8_t*)rgb;
+    (unsigned char)* rgb_ptr = ((unsigned char)*)rgb;
     while (cinfo.output_scanline < cinfo.output_height) 
     {
         jpeg_read_scanlines(&cinfo, &rgb_ptr, 1);
@@ -335,7 +327,7 @@ void col_manip_overwrite_cam(Color_RGBA* rgba)
             // Utility color-manipulation values
             int i = x + y * IMG_WIDTH;
 
-            Color_HSV hsv = {.H = 0.0, .S = 1.0, .V = 1.0};
+            Color_HSV hsv = {.H = 0.0f, .S = 1.0f, .V = 1.0f};
 
             float 
                 u = (float)x / (float)IMG_WIDTH, 
@@ -429,28 +421,6 @@ void col_manip_overwrite_cam(Color_RGBA* rgba)
             rgba[i].G = (_G * 255.0f);
             rgba[i].B = (_B * 255.0f);
             rgba[i].A = 255;
-        
-
-            /*hsv.H = fmod(LERP(300.0, 420.0, (double)u), 360.0);
-
-            if (y < 256)
-            {
-                hsv.S = LERP(0.0, 1.0, fmod((double)v * 3.0, 1.0));
-                hsv.V = 1.0;
-            }
-            else if (y < 512)
-            {
-
-                hsv.S = LERP(0.0, 1.0, fmod((double)v * 3.0, 1.0));
-                hsv.V = LERP(0.5, 1.0, fmod((double)v * 3.0, 1.0));
-            }
-            else
-            {
-                hsv.S = 1.0;
-                hsv.V = LERP(0.0, 1.0, fmod((double)v * 3.0, 1.0));
-            }
-
-            rgba[i] = hsv_to_rgba(hsv);*/
         }
     }
 }
@@ -491,27 +461,6 @@ bool* col_manip_mask_reds(Color_RGBA* rgba, bool* mask)
                 is_red = 0;
                 
             mask[i] = is_red > 0;
-
-            /*bool is_red = true;
-
-            double hue = fmod(hsv.H + 180.0, 360.0) - 180.0;
-
-            if (hue < -20.0 || hue > 5.0)
-                is_red = false;
-
-            if (hsv.S < 10.0)
-                is_red = false;
-
-            if (hsv.V + hsv.S * 0.75 < 105.0)
-                is_red = false;
-
-            if (hsv.V + hsv.S < 95.0 && hsv.V < 50.0)
-                is_red = false;
-
-            if (hsv.V < 50.0)
-                is_red = false;
-
-            mask[i] = is_red;*/
         }
     }
 }
@@ -527,7 +476,7 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
         for (int x = reach; x < IMG_WIDTH - width - reach; x += width)  
         {
             // The image is scanned by getting the sum of 3x3 squares of pixels.
-            // This is done to prevent rogue pixels from being detected.
+            // This is done to reduce the amount of rogue pixels being detected.
             int density = 0;
 
             for (int yb = y; yb < y + width; yb++)
@@ -542,19 +491,21 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
                     .e = x + reach + width, 
                     .s = y + reach + width
                 };
-                bool did_combine = false;
 
+                // Check if the box intersects a previous box.
+                // If yes, merge them. If no, add to new index.
+                bool continue_merging = false;
                 for (int i = 0; i < cluster_count; i++)
                 {
                     if (AABB_intersect(box, clusters[i]))
                     {
                         clusters[i] = AABB_combine(box, clusters[i]);
-                        did_combine = true;
+                        continue_merging = true;
                         break;
                     }
                 }
 
-                if (!did_combine && cluster_count < size)
+                if (!continue_merging && cluster_count < size)
                     clusters[cluster_count++] = box;
             }
         }
@@ -562,19 +513,20 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
 
     // Loop through all clusters and check for new intersections caused by previous merges.
     // Repeat until no new intersections are found.
-    bool doContinue = true;
-    while (doContinue)
+    bool continue_merging = true;
+    while (continue_merging)
     {
-        doContinue = false;
+        continue_merging = false;
         for (int i = 0; i < cluster_count; i++)
         {
             for (int j = 0; j < cluster_count; j++)
             {
-                if (i == j) continue;
+                if (i == j) 
+                    continue;
 
                 if (AABB_intersect(clusters[i], clusters[j]))
                 {
-                    doContinue = true;
+                    continue_merging = true;
 
                     clusters[i] = AABB_combine(clusters[i], clusters[j]);
                     
@@ -586,6 +538,7 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
         }
     }
 
+    // Code for returning only the largest box.
     /*AABB largest_box;
     int largest_area = 0;
 
@@ -709,7 +662,7 @@ void apply_color_manipulation(Color_RGBA* rgba)
 #endif
 
 #ifdef COL_MANIP_ADD_CIRCLE
-    col_manip_add_circle(rgba, 320, 180, 100, 5);
+    col_manip_add_circle(rgba, IMG_WIDTH / 2, IMG_HEIGHT / 2, 100, 3);
 #endif        
 }
 
@@ -721,7 +674,7 @@ void process_image(Capture_Data* data)
 
     apply_color_manipulation(rgba);
 
-    __uint8_t file_name[] = "_.png";
+    unsigned char file_name[] = "_.png";
     file_name[0] = data->file_id;
     stbi_write_png(file_name, 
         IMG_WIDTH, IMG_HEIGHT, 
@@ -751,7 +704,7 @@ int set_supported_video_format(Capture_Data* data)
 
 #ifdef DEBUG
     printf("\nPixel Formats:\n");
-    __uint8_t result[5] = "NULL";
+    unsigned char result[5] = "NULL";
 
     _GetName(V4L2_PIX_FMT_MJPEG, result);
     printf("Desired: %s\n", result);
@@ -848,7 +801,7 @@ int dequeue_buffers(Capture_Data* data)
 
     if (ioctl(data->handle, VIDIOC_DQBUF, &data->queue_buffer) < 0)
     {
-        printf("VIDIOC_DQBUF failed!\n");
+        printf("VIDIOC_DQBUF failed!\n"); 
         //return errno;
         return -1;
     }
@@ -867,7 +820,8 @@ int dequeue_buffers(Capture_Data* data)
 
 int begin_snatching(void)
 {
-#ifdef COL_MANIP_OVERWRITE_CAM
+#ifdef COL_MANIP_OVERWRITE_CAM 
+    // Skip capturing webcam if image is being overwritten.
     Color_RGBA rgba[IMG_SIZE];
     apply_color_manipulation(rgba);
 
