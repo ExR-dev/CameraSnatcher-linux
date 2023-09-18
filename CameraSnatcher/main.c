@@ -25,9 +25,9 @@
 
 
 //#define COL_MANIP_OVERWRITE_CAM
-#define COL_MANIP_MASK_REDS
-#define COL_MANIP_ADD_RECTS
-//#define COL_MANIP_ADD_CIRCLE
+//#define COL_MANIP_MASK_REDS
+//#define COL_MANIP_ADD_RECTS
+#define COL_MANIP_ADD_CIRCLE
 
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -510,7 +510,7 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
             }
         }
     }
-/*
+
     // Loop through all clusters and check for new intersections caused by previous merges.
     // Repeat until no new intersections are found.
     bool continue_merging = true;
@@ -536,7 +536,7 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
                 }
             }
         }
-    }*/
+    }
 
     // Code for returning only the largest box.
     /*AABB largest_box;
@@ -651,7 +651,7 @@ void apply_color_manipulation(Color_RGBA* rgba)
             }
 
 #ifdef COL_MANIP_ADD_RECTS
-    int max_boxes = 2048;
+    int max_boxes = 512;
     AABB boxes[max_boxes];
     int count = scan_for_hotspot(red_mask, boxes, max_boxes);
 
