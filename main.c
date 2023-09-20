@@ -212,6 +212,14 @@ typedef struct Capture_Data
     struct v4l2_buffer queue_buffer;
 } Capture_Data;
 
+typedef struct Img_Manip
+{
+    bool arg_overwrite_cam;
+    bool arg_mask_reds;
+    bool arg_add_rects;
+    bool arg_add_circle;
+} Img_Manip;
+
 
 #ifdef DEBUG
 /// @brief Debug function for getting the name associated with a given output from v4l2_fourcc() in videodev2.h.
@@ -818,7 +826,7 @@ int dequeue_buffers(Capture_Data* data)
 }
 
 
-int begin_snatching(void)
+int begin_snatching(Img_Manip img_manip)
 {
 #ifdef COL_MANIP_OVERWRITE_CAM 
     // Skip capturing webcam if image is being overwritten.
@@ -861,11 +869,26 @@ int begin_snatching(void)
     return 1;
 }
 
-int main(void)
+int main(int argc, const char** argv)
 {
+    Img_Manip img_manip = {false, false, false, false};
+    for (int i = 0; i < argc; i++)
+    {
+        printf("%s\n", argv[i]);
+
+        if (argv[i] == "-oc")
+            img_manip.arg_overwrite_cam = true;
+        else if (argv[i] == "-mr")
+            img_manip.arg_mask_reds = true;
+        else if (argv[i] == "-ar")
+            img_manip.arg_add_rects = true;
+        else if (argv[i] == "-ac")
+            img_manip.arg_add_circle = true;
+    }
+            
     printf("\n======Start============\n");
 
-    int handlerOut = begin_snatching();
+    int handlerOut = begin_snatching(img_manip);
 
     printf("\n\nHandler Output: %i\n", handlerOut);
     printf("======Close============\n\n");
