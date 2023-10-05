@@ -1,5 +1,6 @@
 //#define DEBUG
 
+// gcc main.c -o release -ljpeg -lm -lSDL2
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -16,18 +17,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <linux/videodev2.h>
+#include <SDL2/SDL.h>
 
-// My camera can only output in MJPEG format which as far as I could 
-// find meant that I'd have to use some external library. 
-// (This was written before the module addressing this was published)
 #include <jpeglib.h>
 #include <jerror.h>
-
-
-//#define COL_MANIP_OVERWRITE_CAM
-#define COL_MANIP_MASK_REDS
-#define COL_MANIP_ADD_RECTS
-//#define COL_MANIP_ADD_CIRCLE
 
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -35,17 +28,10 @@
 #define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
 #define LERP(a, b, t) (a * (1.0 - t) + (b * t))
 
-
 #define PI 3.14159265358979323846f
 
-#ifdef COL_MANIP_OVERWRITE_CAM
-#define IMG_WIDTH 1792 //1280
-#define IMG_HEIGHT 512 //768
-#else
 #define IMG_WIDTH 640
 #define IMG_HEIGHT 480
-#endif
-
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 
@@ -77,13 +63,12 @@ AABB AABB_combine(AABB box1, AABB box2)
 }
 
 
-typedef struct Color_RGBA
+typedef struct Color_RGB
 {
     unsigned char R;
     unsigned char G;
     unsigned char B;
-    unsigned char A;
-} Color_RGBA;
+} Color_RGB;
 
 typedef struct Color_HSV
 {
@@ -92,7 +77,7 @@ typedef struct Color_HSV
     float V; // Value (0-100)
 } Color_HSV;
 
-Color_HSV rgba_to_hsv(Color_RGBA rgb) 
+Color_HSV rgb_to_hsv(Color_RGB rgb) 
 {
     float 
         r = rgb.R / 255.0f, 
@@ -117,10 +102,10 @@ Color_HSV rgba_to_hsv(Color_RGBA rgb)
     s = (max == 0.0f) ? (0.0f) : ((diff / max) * 100.0f);
     v = max * 100.0f;
 
-    return (Color_HSV){.H = h, .S = s, .V = v};
+    return (Color_HSV){h, s, v};
 }
 
-Color_RGBA hsv_to_rgba(Color_HSV hsv)
+Color_RGB hsv_to_rgb(Color_HSV hsv)
 {
     float r = 0.0f, g = 0.0f, b = 0.0f;
 
@@ -188,14 +173,13 @@ Color_RGBA hsv_to_rgba(Color_HSV hsv)
 
 	}
 
-	Color_RGBA rgba = {
-        .R = (r * 255.0f),
-        .G = (g * 255.0f),
-        .B = (b * 255.0f),
-        .A = 255
+	Color_RGB rgb = {
+        r * 255,
+        g * 255,
+        b * 255
     };
 
-	return rgba;
+	return rgb;
 }
 
 
@@ -203,7 +187,7 @@ typedef struct Capture_Data
 {
     int handle;
     unsigned char file_id;
-    unsigned char* img_mem[2];
+    unsigned char *img_mem[2];
 
     struct v4l2_format format;
     struct v4l2_requestbuffers buffer_request;
@@ -212,36 +196,13 @@ typedef struct Capture_Data
     struct v4l2_buffer queue_buffer;
 } Capture_Data;
 
-typedef struct Img_Manip
-{
-    bool arg_overwrite_cam;
-    bool arg_mask_reds;
-    bool arg_add_rects;
-    bool arg_add_circle;
-} Img_Manip;
-
-
-#ifdef DEBUG
-/// @brief Debug function for getting the name associated with a given output from v4l2_fourcc() in videodev2.h.
-/// @param code A number outputted from v4l2_fourcc().
-/// @param out The four letter string that makes v4l2_fourcc() output code.
-void _get_v4l2_code_name(unsigned char code, (unsigned char)* out) 
-{
-    out[0] = (unsigned char)((code) - ((code >> 8) << 8));
-    out[1] = (unsigned char)((code >> 8) - ((code >> 16) << 8));
-    out[2] = (unsigned char)((code >> 16) - ((code >> 24) << 8));
-    out[3] = (unsigned char)(code >> 24);
-    out[4] = '\0';
-}
-#endif
-
 
 // Boilerplate code for using jpeglib.
 typedef struct 
 {
     struct jpeg_source_mgr pub;
 
-    JOCTET* buffer;
+    JOCTET *buffer;
     boolean start_of_file;
 } my_source_mgr;
 
@@ -272,10 +233,9 @@ static void jpg_memSkipInputData(j_decompress_ptr cinfo, long num_bytes)
 
 static void jpg_memTermSource(j_decompress_ptr cinfo) { }
 
-void mjpeg_to_rgba(Capture_Data* data, Color_RGBA* rgba)
+void mjpeg_to_rgb(Capture_Data *data, Color_RGB *rgb)
 {
     unsigned char* mjpeg = data->img_mem[data->queue_buffer.index];
-    unsigned char rgb[IMG_SIZE * 3];
     int size = data->queue_buffer.bytesused;
 
     struct jpeg_decompress_struct cinfo;
@@ -312,21 +272,13 @@ void mjpeg_to_rgba(Capture_Data* data, Color_RGBA* rgba)
         rgb_ptr += IMG_WIDTH * 3;
     }
 
-    for (int i = 0; i < IMG_SIZE * 3; i += 3)
-    {
-        rgba[i/3].R = rgb[i+0];
-        rgba[i/3].G = rgb[i+1];
-        rgba[i/3].B = rgb[i+2];
-        rgba[i/3].A = 255;
-    }
-
     jpeg_finish_decompress(&cinfo); 
     jpeg_destroy_decompress(&cinfo);
 }
 // Boilerplate code for using jpeglib.
 
 
-void col_manip_overwrite_cam(Color_RGBA* rgba)
+void col_manip_overwrite_cam(Color_RGB *rgb)
 {
     for (int x = 0; x < IMG_WIDTH; x++)
     {
@@ -335,25 +287,25 @@ void col_manip_overwrite_cam(Color_RGBA* rgba)
             // Utility color-manipulation values
             int i = x + y * IMG_WIDTH;
 
-            Color_HSV hsv = {.H = 0.0f, .S = 1.0f, .V = 1.0f};
+            Color_HSV hsv = {0.0f, 1.0f, 1.0f};
 
             float 
                 u = (float)x / (float)IMG_WIDTH, 
                 v = (float)y / (float)IMG_HEIGHT;
 
             float 
-                r = (float)rgba[i].R / 255.0f,
-                g = (float)rgba[i].G / 255.0f,
-                b = (float)rgba[i].B / 255.0f;
+                r = (float)rgb[i].R / 255.0f,
+                g = (float)rgb[i].G / 255.0f,
+                b = (float)rgb[i].B / 255.0f;
 
             float 
                 _R = 255.0f,
                 _G = 255.0f,
                 _B = 255.0f;
 
-            _R = (float)rgba[i].R / 255.0f;
-            _G = (float)rgba[i].G / 255.0f;
-            _B = (float)rgba[i].B / 255.0f;
+            _R = (float)rgb[i].R / 255.0f;
+            _G = (float)rgb[i].G / 255.0f;
+            _B = (float)rgb[i].B / 255.0f;
             // Utility color-manipulation values
 
             float angle = (u + 0.5f) * 360.0f;
@@ -425,15 +377,14 @@ void col_manip_overwrite_cam(Color_RGBA* rgba)
             _G = CLAMP(g + val2, 0.0f, 1.0f);
             _B = CLAMP(b + val2, 0.0f, 1.0f);
 
-            rgba[i].R = (_R * 255.0f);
-            rgba[i].G = (_G * 255.0f);
-            rgba[i].B = (_B * 255.0f);
-            rgba[i].A = 255;
+            rgb[i].R = (_R * 255.0f);
+            rgb[i].G = (_G * 255.0f);
+            rgb[i].B = (_B * 255.0f);
         }
     }
 }
 
-bool* col_manip_mask_reds(Color_RGBA* rgba, bool* mask)
+bool *col_manip_mask_reds(Color_RGB *rgb, bool *mask)
 {
     for (int x = 0; x < IMG_WIDTH; x++)
     {
@@ -442,12 +393,12 @@ bool* col_manip_mask_reds(Color_RGBA* rgba, bool* mask)
             // Utility color-manipulation values
             int i = x + y * IMG_WIDTH;
 
-            Color_HSV hsv = rgba_to_hsv(rgba[i]);
+            Color_HSV hsv = rgb_to_hsv(rgb[i]);
 
             float 
-                r = (float)rgba[i].R / 255.0f,
-                g = (float)rgba[i].G / 255.0f,
-                b = (float)rgba[i].B / 255.0f;
+                r = (float)rgb[i].R / 255.0f,
+                g = (float)rgb[i].G / 255.0f,
+                b = (float)rgb[i].B / 255.0f;
             // Utility color-manipulation values
             
             float is_red = 1;
@@ -473,7 +424,7 @@ bool* col_manip_mask_reds(Color_RGBA* rgba, bool* mask)
     }
 }
 
-int scan_for_hotspot(bool* mask, AABB* clusters, int size)
+int scan_for_hotspot(bool *mask, AABB *clusters, int size)
 {
     int cluster_count = 0;
     int width = 3;
@@ -494,10 +445,10 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
             if (density >= 3)
             {
                 AABB box = { 
-                    .w = x - reach,  
-                    .n = y - reach, 
-                    .e = x + reach + width, 
-                    .s = y + reach + width
+                    x - reach,  
+                    y - reach, 
+                    x + reach + width, 
+                    y + reach + width
                 };
 
                 // Check if the box intersects a previous box.
@@ -518,56 +469,11 @@ int scan_for_hotspot(bool* mask, AABB* clusters, int size)
             }
         }
     }
-/*
-    // Loop through all clusters and check for new intersections caused by previous merges.
-    // Repeat until no new intersections are found.
-    bool continue_merging = true;
-    while (continue_merging)
-    {
-        continue_merging = false;
-        for (int i = 0; i < cluster_count; i++)
-        {
-            for (int j = 0; j < cluster_count; j++)
-            {
-                if (i == j) 
-                    continue;
-
-                if (AABB_intersect(clusters[i], clusters[j]))
-                {
-                    continue_merging = true;
-
-                    clusters[i] = AABB_combine(clusters[i], clusters[j]);
-                    
-                    for (int n = j + 1; n < cluster_count; n++)
-                        clusters[n-1] = clusters[n];
-                    cluster_count--;
-                }
-            }
-        }
-    }*/
-
-    // Code for returning only the largest box.
-    /*AABB largest_box;
-    int largest_area = 0;
-
-    for (int i = 0; i < cluster_count; i++)
-    {
-        AABB current_box = found_clusters[i];
-
-        int current_area = (current_box.e - current_box.w) 
-                         * (current_box.s - current_box.n);
-
-        if (current_area > largest_area)
-        {
-            largest_box = current_box;
-            largest_area = current_area;
-        }
-    }*/
     
     return cluster_count;
 }
 
-void col_manip_add_circle(Color_RGBA* rgba, int x, int y, int r, int w)
+void col_manip_add_circle(Color_RGB *rgb, int x, int y, int r, int w)
 {
     for (float angle = 0.0f; angle < PI * 2.0f; angle += 1.0f / ((float)(r + w) * PI))
     {
@@ -583,14 +489,14 @@ void col_manip_add_circle(Color_RGBA* rgba, int x, int y, int r, int w)
 
             int i = x_offset + y_offset * IMG_WIDTH;
 
-            rgba[i].R = 255;
-            rgba[i].G = 0;
-            rgba[i].B = 0;
+            rgb[i].R = 255;
+            rgb[i].G = 0;
+            rgb[i].B = 0;
         }
     }
 }
 
-void col_manip_add_rect(Color_RGBA* rgba, AABB box, Color_RGBA fill_color)
+void col_manip_add_rect(Color_RGB *rgb, AABB box, Color_RGB fill_color)
 {
     if (box.n >= 0 && box.n < IMG_HEIGHT)
         for (int x = box.w; x < box.e; x++)
@@ -600,7 +506,7 @@ void col_manip_add_rect(Color_RGBA* rgba, AABB box, Color_RGBA fill_color)
 
             int i = x + box.n * IMG_WIDTH;
 
-            rgba[i] = fill_color;
+            rgb[i] = fill_color;
         }
 
     if (box.s >= 0 && box.s < IMG_HEIGHT)
@@ -611,7 +517,7 @@ void col_manip_add_rect(Color_RGBA* rgba, AABB box, Color_RGBA fill_color)
 
             int i = x + box.s * IMG_WIDTH;
 
-            rgba[i] = fill_color;
+            rgb[i] = fill_color;
         }
 
     if (box.w >= 0 && box.w < IMG_WIDTH)
@@ -622,7 +528,7 @@ void col_manip_add_rect(Color_RGBA* rgba, AABB box, Color_RGBA fill_color)
 
             int i = box.w + y * IMG_WIDTH;
 
-            rgba[i] = fill_color;
+            rgb[i] = fill_color;
         }
 
     if (box.e >= 0 && box.e < IMG_WIDTH)
@@ -633,29 +539,24 @@ void col_manip_add_rect(Color_RGBA* rgba, AABB box, Color_RGBA fill_color)
 
             int i = box.e + y * IMG_WIDTH;
 
-            rgba[i] = fill_color;
+            rgb[i] = fill_color;
         }
 }
 
-void apply_color_manipulation(Color_RGBA* rgba)
+void apply_color_manipulation(Color_RGB *rgb)
 {
-#ifdef COL_MANIP_OVERWRITE_CAM
-    col_manip_overwrite_cam(rgba);
-#endif      
-
-#ifdef COL_MANIP_MASK_REDS
     bool red_mask[IMG_SIZE];
     
-    col_manip_mask_reds(rgba, red_mask);
+    col_manip_mask_reds(rgb, red_mask);
 
     for (int i = 0; i < IMG_HEIGHT; i++)
         for (int j = 0; j < IMG_WIDTH; j++)
             {
                 bool is_red = red_mask[j + i * IMG_WIDTH];
 
-                rgba[j + i * IMG_WIDTH].R /= 1 + (1 - (int)is_red);
-                rgba[j + i * IMG_WIDTH].G /= 1 + (1 - (int)is_red);
-                rgba[j + i * IMG_WIDTH].B /= 1 + (1 - (int)is_red);
+                rgb[j + i * IMG_WIDTH].R /= 1 + (1 - (int)is_red);
+                rgb[j + i * IMG_WIDTH].G /= 1 + (1 - (int)is_red);
+                rgb[j + i * IMG_WIDTH].B /= 1 + (1 - (int)is_red);
             }
 
 #ifdef COL_MANIP_ADD_RECTS
@@ -663,36 +564,33 @@ void apply_color_manipulation(Color_RGBA* rgba)
     AABB boxes[max_boxes];
     int count = scan_for_hotspot(red_mask, boxes, max_boxes);
 
-    Color_RGBA fill = {.R = 0, .G = 255, .B = 0, .A = 255};
+    Color_RGB fill = {.R = 0, .G = 255, .B = 0};
     for (int i = 0; i < count; i++)
-        col_manip_add_rect(rgba, boxes[i], fill);
-#endif
+        col_manip_add_rect(rgb, boxes[i], fill);
 #endif
 
-#ifdef COL_MANIP_ADD_CIRCLE
-    col_manip_add_circle(rgba, IMG_WIDTH / 2, IMG_HEIGHT / 2, 100, 3);
-#endif        
+    col_manip_add_circle(rgb, IMG_WIDTH / 2, IMG_HEIGHT / 2, 100, 3);
 }
 
-void process_image(Capture_Data* data)
+void process_image(Capture_Data *data, void *window_pixels)
 {
-    static Color_RGBA rgba[IMG_SIZE];
+    Color_RGB *rgb = (Color_RGB*)window_pixels;
     
-    mjpeg_to_rgba(data, rgba);
+    mjpeg_to_rgb(data, rgb);
 
-    apply_color_manipulation(rgba);
+    /*apply_color_manipulation(rgb);
 
     unsigned char file_name[] = "_.png";
     file_name[0] = data->file_id;
     stbi_write_png(file_name, 
         IMG_WIDTH, IMG_HEIGHT, 
-        4, &rgba, 
-        IMG_WIDTH * 4);
+        4, rgb, 
+        IMG_WIDTH * 3);*/
 }
 
 
 /// @brief Tells the camera device what video format to use.
-int set_supported_video_format(Capture_Data* data)
+int set_supported_video_format(Capture_Data *data)
 {
     // Overwrite memory in format with 0.
     memset(&data->format, 0, sizeof(data->format));
@@ -710,22 +608,11 @@ int set_supported_video_format(Capture_Data* data)
         return -1;
     }
 
-#ifdef DEBUG
-    printf("\nPixel Formats:\n");
-    unsigned char result[5] = "NULL";
-
-    _GetName(V4L2_PIX_FMT_MJPEG, result);
-    printf("Desired: %s\n", result);
-
-    _GetName(data->format.fmt.pix.pixelformat, result);
-    printf("Actual: %s\n", result);
-#endif
-    
     return 1;
 }
 
 /// @brief Requests the driver to allocate space for two video capture buffers.
-int request_buffers(Capture_Data* data)
+int request_buffers(Capture_Data *data)
 {
     memset(&data->buffer_request, 0, sizeof(data->buffer_request));
 
@@ -744,7 +631,7 @@ int request_buffers(Capture_Data* data)
 }
 
 /// @brief Queries & maps a requested buffer at a given index.
-int query_buffer(Capture_Data* data, int i)
+int query_buffer(Capture_Data *data, int i)
 {
     memset(&data->query_buffer, 0, sizeof(data->query_buffer));
 
@@ -770,7 +657,7 @@ int query_buffer(Capture_Data* data, int i)
 }
 
 /// @brief Queues a buffer at a given index to be filled by the camera device.
-int queue_buffer_to_write(Capture_Data* data, int i)
+int queue_buffer_to_write(Capture_Data *data, int i)
 {
     memset(&data->write_buffer, 0, sizeof(data->write_buffer));
 
@@ -787,7 +674,7 @@ int queue_buffer_to_write(Capture_Data* data, int i)
 }
 
 /// @brief Tells the camera device to begin streaming video data to queued buffers.
-int start_camera(Capture_Data* data)
+int start_camera(Capture_Data *data)
 {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
@@ -800,7 +687,7 @@ int start_camera(Capture_Data* data)
 }
 
 /// @brief Dequeues & processes a filled buffer, then writes to file and requeues buffer.
-int dequeue_buffers(Capture_Data* data)
+int dequeue_buffers(Capture_Data* data, void* window_pixels)
 {
     memset(&data->queue_buffer, 0, sizeof(data->queue_buffer));
 
@@ -814,7 +701,7 @@ int dequeue_buffers(Capture_Data* data)
         return -1;
     }
 
-    process_image(data);
+    process_image(data, window_pixels);
 
     if (ioctl(data->handle, VIDIOC_QBUF, &data->queue_buffer) < 0)
     {
@@ -826,20 +713,8 @@ int dequeue_buffers(Capture_Data* data)
 }
 
 
-int begin_snatching(Img_Manip img_manip)
+int begin_snatching()
 {
-#ifdef COL_MANIP_OVERWRITE_CAM 
-    // Skip capturing webcam if image is being overwritten.
-    Color_RGBA rgba[IMG_SIZE];
-    apply_color_manipulation(rgba);
-
-    stbi_write_png("A.png", 
-        IMG_WIDTH, IMG_HEIGHT, 
-        4, &rgba, 
-        IMG_WIDTH * 4);
-    return 1;
-#endif
-
     Capture_Data data;
     data.handle = open("/dev/video0", O_RDWR, 0);
 
@@ -857,38 +732,53 @@ int begin_snatching(Img_Manip img_manip)
         if (queue_buffer_to_write(&data, i) == -1) 
             return -1;
 
-    printf("\nTaking picture...\n");
+    printf("\nOpening Window...\n");
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Window *g_window = SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, IMG_WIDTH, IMG_HEIGHT, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+    SDL_Renderer *g_renderer = SDL_CreateRenderer(g_window, -1, SDL_RENDERER_ACCELERATED);
+    SDL_Texture *g_stream_texture = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, IMG_WIDTH, IMG_HEIGHT);
 
-    data.file_id = 'A';
-    if (start_camera(&data) == -1) 
-        return -1;
+    const Uint8 *state = SDL_GetKeyboardState(NULL);
+
+    bool escape = false;
+    while (!escape)
+    {
+        SDL_PumpEvents();
+        if (state[SDL_SCANCODE_Q] == 1)
+        {
+            printf("Is escaping (Q pressed)...");
+            escape = true;
+        }
+
+        data.file_id = 'A';
+        if (start_camera(&data) == -1) 
+            return -1;
+
+        void *window_pixels;
+        int pitch;
+        SDL_LockTexture(g_stream_texture, NULL, &window_pixels, &pitch);
+        
+        if (dequeue_buffers(&data, window_pixels) == -1) 
+            return -1;
+
+        SDL_UnlockTexture(g_stream_texture);
+        SDL_RenderClear(g_renderer);
+        SDL_RenderCopy(g_renderer, g_stream_texture, NULL, NULL);
+        SDL_RenderPresent(g_renderer);
+    }
+
+    SDL_DestroyRenderer(g_renderer);
+    SDL_DestroyWindow(g_window);
+    SDL_Quit();
     
-    if (dequeue_buffers(&data) == -1) 
-        return -1;
-
     return 1;
 }
 
 int main(int argc, const char** argv)
-{
-    Img_Manip img_manip = {false, false, false, false};
-    for (int i = 0; i < argc; i++)
-    {
-        printf("%s\n", argv[i]);
-
-        if (argv[i] == "-oc")
-            img_manip.arg_overwrite_cam = true;
-        else if (argv[i] == "-mr")
-            img_manip.arg_mask_reds = true;
-        else if (argv[i] == "-ar")
-            img_manip.arg_add_rects = true;
-        else if (argv[i] == "-ac")
-            img_manip.arg_add_circle = true;
-    }
-            
+{     
     printf("\n======Start============\n");
 
-    int handlerOut = begin_snatching(img_manip);
+    int handlerOut = begin_snatching();
 
     printf("\n\nHandler Output: %i\n", handlerOut);
     printf("======Close============\n\n");
