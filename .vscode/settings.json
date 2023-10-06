@@ -55,5 +55,13 @@
   "C_Cpp_Runner.useLeakSanitizer": false,
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
-  "C_Cpp_Runner.msvcSecureNoWarnings": false
+  "C_Cpp_Runner.msvcSecureNoWarnings": false,
+  "files.associations": {
+    "webcam_handler.h": "c",
+    "stb_image_write.h": "c",
+    "videodev2.h": "c",
+    "jpeglib.h": "c",
+    "string.h": "c",
+    "color_data.h": "c"
+  }
 }
