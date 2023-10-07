@@ -818,7 +818,7 @@ int dequeue_buffers(Capture_Data* data)
 }
 
 
-int begin_snatching(void)
+int start_snatching(void)
 {
 #ifdef COL_MANIP_OVERWRITE_CAM 
     // Skip capturing webcam if image is being overwritten.
@@ -865,7 +865,7 @@ int main(void)
 {
     printf("\n======Start============\n");
 
-    int handlerOut = begin_snatching();
+    int handlerOut = start_snatching();
 
     printf("\n\nHandler Output: %i\n", handlerOut);
     printf("======Close============\n\n");

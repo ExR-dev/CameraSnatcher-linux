@@ -14,16 +14,13 @@ HSV rgb_to_hsv(RGB rgb)
     float min = MIN(r, MIN(g, b));
     float diff = max - min;
 
-    float h, s, v;
+    float h = 0.0, s, v;
 
-    if (max == min)
-       h = 0.0f;
-    else if (max == r)
-       h = fmodf((60.0f * ((g - b) / diff) + 360.0f), 360.0f);
-    else if (max == g)
-       h = fmodf((60.0f * ((b - r) / diff) + 120.0f), 360.0f);
-    else if (max == b)
-       h = fmodf((60.0f * ((r - g) / diff) + 240.0f), 360.0f);
+    if (max == min) 	h = 0.0f;
+    else if (max == r)	h = fmodf((60.0f * ((g - b) / diff) + 360.0f), 360.0f);
+    else if (max == g)	h = fmodf((60.0f * ((b - r) / diff) + 120.0f), 360.0f);
+    else if (max == b)	h = fmodf((60.0f * ((r - g) / diff) + 240.0f), 360.0f);
+	else				h = 0.0f;
 
     s = (max == 0.0f) ? (0.0f) : ((diff / max) * 100.0f);
     v = max * 100.0f;

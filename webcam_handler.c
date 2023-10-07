@@ -13,10 +13,11 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <linux/videodev2.h>
 
+#include <linux/videodev2.h>
 #include <jpeglib.h>
 #include <jerror.h>
+#include <omp.h>
 
 
 typedef struct V4L2_Container
@@ -28,9 +29,9 @@ typedef struct V4L2_Container
     struct v4l2_buffer queue_buffer;
 } V4L2_Container;
 
-Img_Format format;
-Capture_Data data;
-static V4L2_Container container;
+Img_Format img_format;
+Capture_Data capture_data;
+static V4L2_Container v4l2_container;
 
 
 // Boilerplate code for using jpeglib.
@@ -75,16 +76,16 @@ static void jpg_memTermSource(j_decompress_ptr cinfo) { }
 int _set_supported_video_format()
 {
     // Overwrite memory in format with 0.
-    memset(&container.format, 0, sizeof(container.format));
+    memset(&v4l2_container.format, 0, sizeof(v4l2_container.format));
 
-    container.format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    container.format.fmt.pix.width = format.width;
-    container.format.fmt.pix.height = format.height;
-    container.format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-    container.format.fmt.pix.field = V4L2_FIELD_NONE;
+    v4l2_container.format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    v4l2_container.format.fmt.pix.width = img_format.width;
+    v4l2_container.format.fmt.pix.height = img_format.height;
+    v4l2_container.format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    v4l2_container.format.fmt.pix.field = V4L2_FIELD_NONE;
 
     // Set the format in the camera device file.
-    if (ioctl(data.handle, VIDIOC_S_FMT, &container.format) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_S_FMT, &v4l2_container.format) < 0)
     {
         printf("VIDIOC_S_FMT Video format set failed!\n");
         return -1;
@@ -96,15 +97,15 @@ int _set_supported_video_format()
 /// @brief Requests the driver to allocate space for two video capture buffers.
 int _request_buffers()
 {
-    memset(&container.buffer_request, 0, sizeof(container.buffer_request));
+    memset(&v4l2_container.buffer_request, 0, sizeof(v4l2_container.buffer_request));
 
     // Two buffers are requested so that one can be read and the other written to.
     // A single buffer would lead to either resource contention or race conditions.
-    container.buffer_request.count = 2;
-    container.buffer_request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    container.buffer_request.memory = V4L2_MEMORY_MMAP;
+    v4l2_container.buffer_request.count = 2;
+    v4l2_container.buffer_request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    v4l2_container.buffer_request.memory = V4L2_MEMORY_MMAP;
 
-    if (ioctl(data.handle, VIDIOC_REQBUFS, &container.buffer_request) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_REQBUFS, &v4l2_container.buffer_request) < 0)
     {
         printf("VIDIOC_REQBUFS failed!\n");
         return -1;
@@ -115,25 +116,25 @@ int _request_buffers()
 /// @brief Queries & maps a requested buffer at a given index.
 int _query_buffer(int i)
 {
-    memset(&container.query_buffer, 0, sizeof(container.query_buffer));
+    memset(&v4l2_container.query_buffer, 0, sizeof(v4l2_container.query_buffer));
 
-    container.query_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    container.query_buffer.memory = V4L2_MEMORY_MMAP;
-    container.query_buffer.index = i;
+    v4l2_container.query_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    v4l2_container.query_buffer.memory = V4L2_MEMORY_MMAP;
+    v4l2_container.query_buffer.index = i;
 
-    if (ioctl(data.handle, VIDIOC_QUERYBUF, &container.query_buffer) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_QUERYBUF, &v4l2_container.query_buffer) < 0)
     {
         printf("VIDIOC_QUERYBUF failed at index %i!\n", i);
         return -1;
     }
 
-    data.img_mem[i] = mmap(
+    capture_data.img_mem[i] = mmap(
         NULL,
-        container.query_buffer.length,
+        v4l2_container.query_buffer.length,
         PROT_READ,
         MAP_SHARED,
-        data.handle,
-        container.query_buffer.m.offset);
+        capture_data.handle,
+        v4l2_container.query_buffer.m.offset);
 
     return 0;
 }
@@ -141,13 +142,13 @@ int _query_buffer(int i)
 /// @brief Queues a buffer at a given index to be filled by the camera device.
 int _queue_buffer_to_write(int i)
 {
-    memset(&container.write_buffer, 0, sizeof(container.write_buffer));
+    memset(&v4l2_container.write_buffer, 0, sizeof(v4l2_container.write_buffer));
 
-    container.write_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    container.write_buffer.memory = V4L2_MEMORY_MMAP;
-    container.write_buffer.index = i;
+    v4l2_container.write_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    v4l2_container.write_buffer.memory = V4L2_MEMORY_MMAP;
+    v4l2_container.write_buffer.index = i;
 
-    if (ioctl(data.handle, VIDIOC_QBUF, &container.write_buffer) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_QBUF, &v4l2_container.write_buffer) < 0)
     {
         printf("VIDIOC_QBUF failed at index %i!\n", i);
         return -1;
@@ -160,7 +161,7 @@ int _start_camera()
 {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
-    if (ioctl(data.handle, VIDIOC_STREAMON, &type) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_STREAMON, &type) < 0)
     {
         printf("VIDIOC_STREAMON failed!\n");
         return -1;
@@ -171,12 +172,12 @@ int _start_camera()
 /// @brief Dequeues & processes a filled buffer.
 int _dequeue_buffer()
 {
-    memset(&container.queue_buffer, 0, sizeof(container.queue_buffer));
+    memset(&v4l2_container.queue_buffer, 0, sizeof(v4l2_container.queue_buffer));
 
-    container.queue_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    container.queue_buffer.memory = V4L2_MEMORY_MMAP;
+    v4l2_container.queue_buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    v4l2_container.queue_buffer.memory = V4L2_MEMORY_MMAP;
 
-    if (ioctl(data.handle, VIDIOC_DQBUF, &container.queue_buffer) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_DQBUF, &v4l2_container.queue_buffer) < 0)
     {
         printf("VIDIOC_DQBUF failed!\n");
         return -1;
@@ -188,7 +189,7 @@ int _dequeue_buffer()
 /// @brief Requeues a dequeued buffer.
 int _requeue_buffer()
 {
-    if (ioctl(data.handle, VIDIOC_QBUF, &container.queue_buffer) < 0)
+    if (ioctl(capture_data.handle, VIDIOC_QBUF, &v4l2_container.queue_buffer) < 0)
     {
         printf("VIDIOC_QBUF failed!\n");
         return -1;
@@ -201,8 +202,7 @@ int _requeue_buffer()
 
 int webcam_init()
 {
-    container = (V4L2_Container){ };
-    data.handle = open("/dev/video0", O_RDWR, 0);
+    capture_data.handle = open("/dev/video0", O_RDWR, 0);
 
     if (_set_supported_video_format() == -1) 
         return -1;
@@ -242,8 +242,8 @@ int close_frame()
 
 int mjpeg_to_rgb(RGB *rgb)
 {
-    unsigned char* mjpeg = data.img_mem[container.queue_buffer.index];
-    int size = container.queue_buffer.bytesused;
+    unsigned char* mjpeg = capture_data.img_mem[v4l2_container.queue_buffer.index];
+    int size = v4l2_container.queue_buffer.bytesused;
 
     struct jpeg_decompress_struct cinfo;
     struct jpeg_error_mgr jerr;
@@ -269,14 +269,21 @@ int mjpeg_to_rgb(RGB *rgb)
     src->pub.bytes_in_buffer = size;
     src->pub.next_input_byte = mjpeg;
 
-    jpeg_read_header(&cinfo, TRUE);
+    printf("1.");
+    if (jpeg_read_header(&cinfo, FALSE) != 1)
+    {
+        printf("\nIt happened.\n");
+        return -1;
+    }
+    printf("2.");
     jpeg_start_decompress(&cinfo);
+    printf("3.");
 
     unsigned char* rgb_ptr = (unsigned char*)rgb;
     while (cinfo.output_scanline < cinfo.output_height) 
     {
         jpeg_read_scanlines(&cinfo, &rgb_ptr, 1);
-        rgb_ptr += format.width * 3;
+        rgb_ptr += img_format.width * 3;
     }
 
     jpeg_finish_decompress(&cinfo); 

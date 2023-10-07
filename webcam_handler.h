@@ -17,8 +17,8 @@ typedef struct Capture_Data
 } Capture_Data;
 
 
-extern Img_Format format;
-extern Capture_Data data;
+extern Img_Format img_format;
+extern Capture_Data capture_data;
 
 
 int webcam_init();

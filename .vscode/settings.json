@@ -62,6 +62,7 @@
     "videodev2.h": "c",
     "jpeglib.h": "c",
     "string.h": "c",
-    "color_data.h": "c"
+    "color_data.h": "c",
+    "sdl.h": "c"
   }
 }
