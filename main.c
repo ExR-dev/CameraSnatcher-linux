@@ -7,7 +7,7 @@
 // gcc main.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
 // ./release
 
-//#define USE_THREADS
+#define USE_THREADS
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -36,7 +36,7 @@
 #define PI 3.14159265358979323846
 
 #define IMG_WIDTH 640
-#define IMG_HEIGHT 480
+#define IMG_HEIGHT 360
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 
@@ -98,17 +98,28 @@ void col_manip_add_circle(RGB *rgb, int x, int y, int r, int w)
 }
 
 
+int process_image(RGB *rgb)
+{
+    int conversion_result = mjpeg_to_rgb(rgb);
+    printf("\n");
+
+    if (conversion_result == -1)
+        return -1;
+
+    return 0;
+}
+
 int save_png(RGB *rgb, char *name)
 {
     char *file_name = malloc(strlen(name) + strlen(".png") + 1);
 
+    // Append the extension to the filename.
     strcpy(file_name, name);
     strcat(file_name, ".png");
 
     int write_result = stbi_write_png(file_name, 
         IMG_WIDTH, IMG_HEIGHT, 
-        3, rgb, 
-        IMG_WIDTH * 3);
+        3, rgb, IMG_WIDTH * 3);
 
     free(file_name);
 
@@ -124,28 +135,20 @@ int save_png(RGB *rgb, char *name)
 void* threaded_save_png(void* input)
 {
     Save_Img_Thread_Data t_data = *(Save_Img_Thread_Data*)input;
+
+    // Get the length of the indexed name using snprintf.
     int name_length = snprintf(NULL, 0, "Frame %d", t_data.frame_num);
+    // Write the name to a string using sprintf.
     char *img_name = malloc(name_length + 1);
     sprintf(img_name, "Frame %d", t_data.frame_num);
 
     int save_result = save_png(t_data.rgb_copy, img_name);
-    printf("Frame %d Captured. (out: %d)\n", t_data.frame_num, save_result);
     
     free(img_name);
     free(t_data.rgb_copy);
+
+    printf("Frame %d Captured. (out: %d)\n", t_data.frame_num, save_result);
     return NULL;
-}
-
-
-int process_image(RGB *rgb)
-{
-    int conversion_result = mjpeg_to_rgb(rgb);
-    printf("\n");
-
-    if (conversion_result == -1)
-        return -1;
-
-    return 0;
 }
 
 
@@ -156,7 +159,6 @@ int start_snatching()
     img_format.size = IMG_SIZE;
 
     if (webcam_init() == -1) return -1;
-
 
     printf("\nOpening Window...\n");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) 
@@ -293,8 +295,11 @@ int main(int argc, const char** argv)
     printf("\n======Start============\n");
 
     int handlerOut = start_snatching();
-    printf("\nHandler Output: %i\n", handlerOut);
 
-    printf("======Close============\n\n");
+    printf("\n======Quit=============\n");
+
+    printf("Handler Output: %i\n", handlerOut);
+
+    printf("=======================\n");
     return handlerOut;
 }
