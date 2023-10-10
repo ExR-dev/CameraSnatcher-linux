@@ -9,9 +9,9 @@
 
 typedef struct RGB
 {
-    unsigned char R;
-    unsigned char G;
     unsigned char B;
+    unsigned char G;
+    unsigned char R;
 } RGB;
 
 typedef struct HSV

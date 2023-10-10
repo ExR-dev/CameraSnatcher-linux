@@ -63,6 +63,9 @@
     "jpeglib.h": "c",
     "string.h": "c",
     "color_data.h": "c",
-    "sdl.h": "c"
-  }
+    "sdl.h": "c",
+    "stdio.h": "c",
+    "stdbool.h": "c"
+  },
+  "C_Cpp.dimInactiveRegions": false
 }

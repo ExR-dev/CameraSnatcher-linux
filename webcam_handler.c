@@ -1,5 +1,6 @@
 #include "webcam_handler.h"
 #include "color_data.h"
+#include "jpegutils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,10 +15,10 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-#include <linux/videodev2.h>
-#include <jpeglib.h>
-#include <jerror.h>
 #include <omp.h>
+#include <linux/videodev2.h>
+//#include <jpeglib.h>
+//#include <jerror.h>
 
 
 typedef struct V4L2_Container
@@ -35,7 +36,7 @@ static V4L2_Container v4l2_container;
 
 
 // Boilerplate code for using jpeglib.
-typedef struct 
+/*typedef struct 
 {
     struct jpeg_source_mgr pub;
 
@@ -68,7 +69,7 @@ static void jpg_memSkipInputData(j_decompress_ptr cinfo, long num_bytes)
     }
 }
 
-static void jpg_memTermSource(j_decompress_ptr cinfo) { }
+static void jpg_memTermSource(j_decompress_ptr cinfo) { }*/
 // Boilerplate code for using jpeglib.
 
 
@@ -198,6 +199,16 @@ int _requeue_buffer()
     return 0;
 }
 
+void _yuyv_to_rgb(unsigned char y, unsigned char u, unsigned char v, RGB *_rgb)
+{
+    int c = y - 16;
+    int d = u - 128;
+    int e = v - 128;
+
+    _rgb->R = MAX(0, MIN((298 * c + 516 * d + 128) >> 8, 255));
+    _rgb->G = MAX(0, MIN((298 * c - 100 * d - 208 * e + 128) >> 8, 255));
+    _rgb->B = MAX(0, MIN((298 * c + 409 * e + 128) >> 8, 255));
+}
 
 
 int webcam_init()
@@ -242,51 +253,69 @@ int close_frame()
 
 int mjpeg_to_rgb(RGB *rgb)
 {
-    unsigned char* mjpeg = capture_data.img_mem[v4l2_container.queue_buffer.index];
+    const unsigned char *mjpeg = capture_data.img_mem[v4l2_container.queue_buffer.index];
     int size = v4l2_container.queue_buffer.bytesused;
 
-    struct jpeg_decompress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-    my_src_ptr src;
+    unsigned char 
+        col_y[img_format.size],
+        col_u[img_format.size],
+        col_v[img_format.size];
 
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_decompress(&cinfo);
+    int result = decode_jpeg_raw(
+        (unsigned char*)mjpeg, 
+        size, 
+        0, Y4M_CHROMA_422, 
+        img_format.width, img_format.height, 
+        col_y, col_u, col_v);
 
-    cinfo.src = (struct jpeg_source_mgr*)(*cinfo.mem->alloc_small)(
-        (j_common_ptr)&cinfo, 
-        JPOOL_PERMANENT, 
-        sizeof(my_source_mgr)
-        );
-    
-    src = (my_src_ptr)cinfo.src;
-    src->buffer = (JOCTET*)mjpeg;
+    if (result != 0)
+        printf("Error in decode_jpeg_raw: %d\n",result);
 
-    src->pub.init_source = jpg_memInitSource;
-    src->pub.fill_input_buffer = jpg_memFillInputBuffer;
-    src->pub.skip_input_data = jpg_memSkipInputData;
-    src->pub.resync_to_restart = jpeg_resync_to_restart;
-    src->pub.term_source = jpg_memTermSource;
-    src->pub.bytes_in_buffer = size;
-    src->pub.next_input_byte = mjpeg;
+    int yuv_size = img_format.width * img_format.height / 2;
 
-    printf("1.");
-    if (jpeg_read_header(&cinfo, FALSE) != 1)
+#ifdef USE_THREADS
+    /*#define NUM_THREADS 4;
+    #pragma omp parallel num_threads(NUM_THREADS)
     {
-        printf("\nIt happened.\n");
-        return -1;
-    }
-    printf("2.");
-    jpeg_start_decompress(&cinfo);
-    printf("3.");
+        int t_id = omp_get_thread_num();
 
-    unsigned char* rgb_ptr = (unsigned char*)rgb;
-    while (cinfo.output_scanline < cinfo.output_height) 
+        for (int i = yuv_size * t_id / NUM_THREADS; i < yuv_size * (t_id + 1) / NUM_THREADS; i++)
+        {
+            unsigned char 
+                y1 = col_y[i * 2],
+                y2 = col_y[i * 2 + 1],
+                u = col_u[i],
+                v = col_v[i];
+
+            _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
+            _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
+        }
+    }*/
+    #pragma omp parallel for num_threads(4)
+        for (int i = 0; i < yuv_size; i++)
+        {
+            unsigned char 
+                y1 = col_y[i * 2],
+                y2 = col_y[i * 2 + 1],
+                u = col_u[i],
+                v = col_v[i];
+
+            _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
+            _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
+        }
+#else
+    for (int i = 0; i < yuv_size; i++)
     {
-        jpeg_read_scanlines(&cinfo, &rgb_ptr, 1);
-        rgb_ptr += img_format.width * 3;
-    }
+        unsigned char 
+            y1 = col_y[i * 2],
+            y2 = col_y[i * 2 + 1],
+            u = col_u[i],
+            v = col_v[i];
 
-    jpeg_finish_decompress(&cinfo); 
-    jpeg_destroy_decompress(&cinfo);
+        _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
+        _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
+    }
+#endif
+
     return 0;
 }

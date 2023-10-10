@@ -1,10 +1,10 @@
-// gcc -Wall -g main.c webcam_handler.c color_data.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp
+// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp
 // valgrind --leak-check=full --track-origins=yes -s ./release
 
-// gcc -Wall -g main.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
+// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
 // ./release
 
-// gcc main.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
+// gcc main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
 // ./release
 
 #define USE_THREADS
@@ -39,6 +39,17 @@
 #define IMG_HEIGHT 360
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
+
+typedef struct Timer_Data
+{
+    double frame_times[512];
+    double yuyv_converts[256];
+
+    double tot_time;
+
+    unsigned short frame_count;
+    unsigned char yuyv_convert_count;
+} Timer_Data;
 
 typedef struct Save_Img_Thread_Data
 {
@@ -101,8 +112,6 @@ void col_manip_add_circle(RGB *rgb, int x, int y, int r, int w)
 int process_image(RGB *rgb)
 {
     int conversion_result = mjpeg_to_rgb(rgb);
-    printf("\n");
-
     if (conversion_result == -1)
         return -1;
 
@@ -132,7 +141,7 @@ int save_png(RGB *rgb, char *name)
     return 0;
 }
 
-void* threaded_save_png(void* input)
+void *threaded_save_png(void *input)
 {
     Save_Img_Thread_Data t_data = *(Save_Img_Thread_Data*)input;
 
@@ -152,7 +161,7 @@ void* threaded_save_png(void* input)
 }
 
 
-int start_snatching()
+int start_snatching(Timer_Data *timer)
 {
     img_format.width = IMG_WIDTH;
     img_format.height = IMG_HEIGHT;
@@ -192,11 +201,21 @@ int start_snatching()
     const Uint8 *state = SDL_GetKeyboardState(&key_count);
     Uint8 *const last_state = malloc(key_count * sizeof(Uint8));
 
-    bool escape = false;
+    printf("\n{\n");
+
+    unsigned int frame_i = 0;
     unsigned char img_num = 0;
+
+    double curr_frame_time = 0;
+    double start_time = omp_get_wtime();
+
+    bool escape = false;
     while (!escape)
     {
-        printf("\n{\n");
+        frame_i++;
+
+        if (timer->frame_count < 512)
+            curr_frame_time = omp_get_wtime();
 
         for (int i = 0; i < key_count; i++)
             last_state[i] = state[i];
@@ -270,9 +289,14 @@ int start_snatching()
 
         SDL_RenderPresent(g_renderer);
 
-        printf("}\n");
+        if (timer->frame_count == 512 - 1)
+            printf("cap reached.\n");
+        if (timer->frame_count < 512)
+            timer->frame_times[timer->frame_count++] = (omp_get_wtime() - curr_frame_time) * 1000.0;
     }
-    printf("Quitting...\n");
+    printf("}\n");
+    timer->tot_time = (omp_get_wtime() - start_time) * 1000.0 / (double)frame_i;
+
     free(last_state);
 
     SDL_DestroyRenderer(g_renderer);
@@ -293,13 +317,20 @@ int start_snatching()
 int main(int argc, const char** argv)
 {     
     printf("\n======Start============\n");
-
-    int handlerOut = start_snatching();
-
+    Timer_Data timer = (Timer_Data){ {}, {}, 0, 0 };
+    int handlerOut = start_snatching(&timer);
     printf("\n======Quit=============\n");
 
-    printf("Handler Output: %i\n", handlerOut);
+    double tot_frame_time = 0;
+    for (int i = 0; i < timer.frame_count; i++)
+    {
+        tot_frame_time += timer.frame_times[i];
+    }
+    printf("Avg Frame length across %d frames: ", (int)timer.frame_count);
+    printf("%f ms\n", (float)tot_frame_time / (float)timer.frame_count);
+    printf("Lifetime / Frame count: %f ms\n", (float)timer.tot_time);
 
+    printf("Handler Output: %i\n", handlerOut);
     printf("=======================\n");
     return handlerOut;
 }
