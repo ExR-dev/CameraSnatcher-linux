@@ -1,3 +1,6 @@
+
+#define USE_THREADS
+
 #include "color_data.h"
 
 #include <math.h>

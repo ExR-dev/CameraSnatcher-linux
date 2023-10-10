@@ -1,13 +1,15 @@
-// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp
+// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // valgrind --leak-check=full --track-origins=yes -s ./release
 
-// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
+// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
-// gcc main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp
+// gcc main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
+
 
 #define USE_THREADS
+
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -214,9 +216,6 @@ int start_snatching(Timer_Data *timer)
     {
         frame_i++;
 
-        if (timer->frame_count < 512)
-            curr_frame_time = omp_get_wtime();
-
         for (int i = 0; i < key_count; i++)
             last_state[i] = state[i];
         SDL_PumpEvents();
@@ -236,6 +235,10 @@ int start_snatching(Timer_Data *timer)
             printf("ERROR: %s\n", SDL_GetError());
             return -1;
         }
+
+
+        if (timer->frame_count < 512)
+            curr_frame_time = omp_get_wtime();
 
         // Begin image manipulation.
         RGB *rgb = (RGB*)window_pixels;
@@ -273,6 +276,12 @@ int start_snatching(Timer_Data *timer)
         }
         // End image manipulation.
 
+        if (timer->frame_count == 512 - 1)
+            printf("cap reached.\n");
+        if (timer->frame_count < 512)
+            timer->frame_times[timer->frame_count++] = (omp_get_wtime() - curr_frame_time) * 1000.0;
+            
+
         if (close_frame() == -1) return -1;
 
         SDL_UnlockTexture(g_stream_texture);
@@ -288,11 +297,6 @@ int start_snatching(Timer_Data *timer)
         }
 
         SDL_RenderPresent(g_renderer);
-
-        if (timer->frame_count == 512 - 1)
-            printf("cap reached.\n");
-        if (timer->frame_count < 512)
-            timer->frame_times[timer->frame_count++] = (omp_get_wtime() - curr_frame_time) * 1000.0;
     }
     printf("}\n");
     timer->tot_time = (omp_get_wtime() - start_time) * 1000.0 / (double)frame_i;

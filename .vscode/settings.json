@@ -65,7 +65,9 @@
     "color_data.h": "c",
     "sdl.h": "c",
     "stdio.h": "c",
-    "stdbool.h": "c"
+    "stdbool.h": "c",
+    "math.h": "c",
+    "stdlib.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }

@@ -1,3 +1,6 @@
+
+#define USE_THREADS
+
 #include "webcam_handler.h"
 #include "color_data.h"
 #include "jpegutils.h"
@@ -274,11 +277,13 @@ int mjpeg_to_rgb(RGB *rgb)
     int yuv_size = img_format.width * img_format.height / 2;
 
 #ifdef USE_THREADS
-    /*#define NUM_THREADS 4;
+    printf("pixels: %d\n", yuv_size);
+    
+    #define NUM_THREADS 8
     #pragma omp parallel num_threads(NUM_THREADS)
     {
         int t_id = omp_get_thread_num();
-
+        printf("Converting %d - %d\n", yuv_size * t_id / NUM_THREADS, yuv_size * (t_id + 1) / NUM_THREADS);
         for (int i = yuv_size * t_id / NUM_THREADS; i < yuv_size * (t_id + 1) / NUM_THREADS; i++)
         {
             unsigned char 
@@ -290,8 +295,10 @@ int mjpeg_to_rgb(RGB *rgb)
             _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
             _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
         }
-    }*/
-    #pragma omp parallel for num_threads(4)
+    }
+
+    printf(".\n");
+    /*#pragma omp parallel for //num_threads(NUM_THREADS)
         for (int i = 0; i < yuv_size; i++)
         {
             unsigned char 
@@ -302,7 +309,7 @@ int mjpeg_to_rgb(RGB *rgb)
 
             _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
             _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
-        }
+        }*/
 #else
     for (int i = 0; i < yuv_size; i++)
     {
