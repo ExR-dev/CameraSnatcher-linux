@@ -21,37 +21,35 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <math.h>
+//#include <math.h>
 
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
+//#include <unistd.h>
+//#include <fcntl.h>
+//#include <errno.h>
+//#include <sys/ioctl.h>
+//#include <sys/stat.h>
+//#include <sys/mman.h>
 
-#include <linux/videodev2.h>
+//#include <linux/videodev2.h>
 #include <SDL2/SDL.h>
 #include <omp.h>
 #include <pthread.h>
 
 
 
-#define IMG_WIDTH 1280 // 320 640 800 1280
-#define IMG_HEIGHT 720 // 240 480 600 720
+#define IMG_WIDTH 800 // 320 640 800 1280
+#define IMG_HEIGHT 600 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 #define TIMED_FRAMES 128
 
+
 typedef struct Timer_Data
 {
     double frame_times[TIMED_FRAMES];
-    double yuyv_converts[256];
-
     double tot_time;
 
     unsigned short frame_count;
-    unsigned char yuyv_convert_count;
 } Timer_Data;
 
 typedef struct Save_Img_Thread_Data
@@ -59,33 +57,6 @@ typedef struct Save_Img_Thread_Data
     unsigned int frame_num;
     Color *rgb_copy;
 } Save_Img_Thread_Data;
-
-typedef struct AABB
-{
-    unsigned short n; // The y-value of the boxes northern edge.
-    unsigned short e; // The x-value of the boxes eastern edge.
-    unsigned short s; // The y-value of the boxes southern edge.
-    unsigned short w; // The x-value of the boxes western edge.
-} AABB;
-
-bool AABB_intersect(AABB box1, AABB box2)
-{
-    if (box1.e < box2.w) return false;
-    if (box1.w > box2.e) return false;
-    if (box1.s < box2.n) return false;
-    if (box1.n > box2.s) return false;
-    return true;
-}
-
-AABB AABB_combine(AABB box1, AABB box2)
-{
-    AABB new_box;
-    new_box.n = MIN(box1.n, box2.n);
-    new_box.s = MAX(box1.s, box2.s);
-    new_box.w = MIN(box1.w, box2.w);
-    new_box.e = MAX(box1.e, box2.e);
-    return new_box;
-}
 
 
 int process_image(const Img_Format *format, Color *rgb)

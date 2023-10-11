@@ -107,3 +107,10 @@ Color hsv_to_rgb(HSV hsv)
 
 	return rgb;
 }
+
+inline float color_magnitude_sqr(Color col1, Color col2)
+{
+	return (col2.R - col1.R) * (col2.R - col1.R) 
+		 + (col2.G - col1.G) * (col2.G - col1.G) 
+		 + (col2.B - col1.B) * (col2.B - col1.B);
+}

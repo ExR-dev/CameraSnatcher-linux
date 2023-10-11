@@ -3,8 +3,11 @@
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
+
 #define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
 #define LERP(a, b, t) (a * (1.0 - t) + (b * t))
+
+#define VEC3_SQR_MAG(u, v) (u[])
 
 #define PI 3.14159265358979323846
 
@@ -34,5 +37,7 @@ typedef struct HSV
 HSV rgb_to_hsv(Color rgb);
 
 Color hsv_to_rgb(HSV hsv);
+
+inline float color_magnitude_sqr(Color col1, Color col2);
 
 #endif
