@@ -21,9 +21,9 @@ typedef struct Img_Format
 
 typedef struct Color
 {
-    unsigned char B;
-    unsigned char G;
     unsigned char R;
+    unsigned char G;
+    unsigned char B;
 } Color;
 
 typedef struct HSV
@@ -38,6 +38,6 @@ HSV rgb_to_hsv(Color rgb);
 
 Color hsv_to_rgb(HSV hsv);
 
-inline float color_magnitude_sqr(Color col1, Color col2);
+float color_magnitude_sqr(Color col1, Color col2);
 
 #endif

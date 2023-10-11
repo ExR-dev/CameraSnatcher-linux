@@ -37,8 +37,8 @@
 
 
 
-#define IMG_WIDTH 800 // 320 640 800 1280
-#define IMG_HEIGHT 600 // 240 480 600 720
+#define IMG_WIDTH 640 // 320 640 800 1280
+#define IMG_HEIGHT 480 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 #define TIMED_FRAMES 128
@@ -57,6 +57,24 @@ typedef struct Save_Img_Thread_Data
     unsigned int frame_num;
     Color *rgb_copy;
 } Save_Img_Thread_Data;
+
+
+typedef struct AABB
+{
+    unsigned short n; // The y-value of the boxes northern edge.
+    unsigned short e; // The x-value of the boxes eastern edge.
+    unsigned short s; // The y-value of the boxes southern edge.
+    unsigned short w; // The x-value of the boxes western edge.
+} AABB;
+
+bool AABB_intersect(AABB box1, AABB box2)
+{
+    if (box1.e < box2.w) return false;
+    if (box1.w > box2.e) return false;
+    if (box1.s < box2.n) return false;
+    if (box1.n > box2.s) return false;
+    return true;
+}
 
 
 int process_image(const Img_Format *format, Color *rgb)
@@ -234,6 +252,8 @@ int start_snatching(Timer_Data *timer)
         {
             Color *window_rgb = &((Color*)window_pixels)[i];
             *window_rgb = rgb[i];
+            //*window_rgb = (Color){rgb[i].B, rgb[i].G, rgb[i].R};
+            //*window_rgb = (Color){rgb[i].R, rgb[i].G, rgb[i].B};
         }
         
         if (frame_i < TIMED_FRAMES)
@@ -263,7 +283,7 @@ int start_snatching(Timer_Data *timer)
             {
                 printf("cap reached.\n");
                 timer->tot_time = (omp_get_wtime() - start_time) * 1000.0 / (double)frame_i;
-                escape = true;
+                //escape = true;
             }
             timer->frame_count = ++frame_i;
         }
@@ -290,7 +310,7 @@ int start_snatching(Timer_Data *timer)
 int main(int argc, const char** argv)
 {     
     printf("\n======Start============\n");
-    Timer_Data timer = (Timer_Data){ {}, {}, 0, 0 };
+    Timer_Data timer = (Timer_Data){ {}, 0, 0 };
     int handlerOut = start_snatching(&timer);
     printf("\n======Quit=============\n");
 

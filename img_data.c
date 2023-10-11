@@ -100,15 +100,15 @@ Color hsv_to_rgb(HSV hsv)
 	}
 
 	Color rgb = {
-        r * 255,
-        g * 255,
-        b * 255
+        .R = r * 255,
+        .G = g * 255,
+        .B = b * 255
     };
 
 	return rgb;
 }
 
-inline float color_magnitude_sqr(Color col1, Color col2)
+float color_magnitude_sqr(Color col1, Color col2)
 {
 	return (col2.R - col1.R) * (col2.R - col1.R) 
 		 + (col2.G - col1.G) * (col2.G - col1.G) 

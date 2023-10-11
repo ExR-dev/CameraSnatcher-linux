@@ -11,15 +11,8 @@
 #include <string.h>
 #include <math.h>
 
-//#include <unistd.h>
-//#include <fcntl.h>
-//#include <errno.h>
-//#include <sys/ioctl.h>
-//#include <sys/stat.h>
-//#include <sys/mman.h>
-
 #include <omp.h>
-///#include <pthread.h>
+#include <pthread.h>
 
 
 void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned char v, Color *rgb)
@@ -28,15 +21,14 @@ void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned 
     int d = u - 128;
     int e = v - 128;
 
-    rgb[0].R = MAX(0, MIN((298 * c + 516 * d + 128) >> 8, 255));
-    rgb[0].G = MAX(0, MIN((298 * c - 100 * d - 208 * e + 128) >> 8, 255));
-    rgb[0].B = MAX(0, MIN((298 * c + 409 * e + 128) >> 8, 255));
+    for (unsigned char i = 0; i < 2; i++)
+    {
+        rgb[i].R = MAX(0, MIN((298 * c + 409 * e + 128) >> 8, 255));
+        rgb[i].G = MAX(0, MIN((298 * c - 100 * d - 208 * e + 128) >> 8, 255));
+        rgb[i].B = MAX(0, MIN((298 * c + 516 * d + 128) >> 8, 255));
 
-    c = y2 - 16;
-
-    rgb[1].R = MAX(0, MIN((298 * c + 516 * d + 128) >> 8, 255));
-    rgb[1].G = MAX(0, MIN((298 * c - 100 * d - 208 * e + 128) >> 8, 255));
-    rgb[1].B = MAX(0, MIN((298 * c + 409 * e + 128) >> 8, 255));
+        c = y2 - 16;
+    }
 }
 
 int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format *format, Color *rgb)
@@ -89,7 +81,7 @@ int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format
             y2 = col_y[i * 2 + 1],
             v = col_v[i];
 
-        _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
+            _yuyv_to_rgb(y1, u, y2, v, &rgb[i * 2]);
     }
 
 #endif
@@ -97,14 +89,15 @@ int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format
 }
 
 
-inline Color _desired_col_at_dist(float dist, float max_dist)
+Color _desired_col_at_dist(float dist, float max_dist)
 {
-    return (Color){255, LERP(255, 0, dist / max_dist), LERP(255, 0, dist / max_dist)};
+    unsigned char luminance = (unsigned char)LERP(255.0f, 0.0f, dist / max_dist);
+    return (Color){ .R = 255, .G = luminance, .B = luminance};
 }
 
 int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int* result_str)
 {
-    int dot_radius = 15;
+    int dot_radius = 20;
     float max_dist = sqrtf(dot_radius * dot_radius);
 
     *result_str = -1, 
@@ -130,11 +123,13 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
         for (int i = start_i; i < end_i; i++)
         {
-            if (rgb[i].R >= 250 && rgb[i].G >= 250 && rgb[i].B >= 250)
+            if (rgb[i].R == 255 && rgb[i].G >= 254 && rgb[i].B >= 254)
             {
+                i += 7;
+
                 int 
                     i_x = i % format->width, 
-                    i_y = (i - i_x) / format->height;
+                    i_y = (i/* - i_x*/) / format->width;
 
                 float curr_match_strength = 0.0f;
 
@@ -154,7 +149,8 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
                         float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
 
-                        curr_match_strength += 10.0f / log2f(col_offset);
+                        //curr_match_strength += 100.0f / (log2f(col_offset + 2.0f) * log2f(col_offset + 1.0f));
+                        curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
                     }
                 }
                 
@@ -183,11 +179,13 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
     for (int i = 0; i < format->size; i++)
     {
-        if (rgb[i].R >= 250 && rgb[i].G >= 250 && rgb[i].B >= 250)
+        if (rgb[i].R == 255 && rgb[i].G >= 254 && rgb[i].B >= 254)
         {
+            i += 7;
+
             int 
                 i_x = i % format->width, 
-                i_y = (i - i_x) / format->height;
+                i_y = i / format->width;
 
             float curr_match_strength = 0.0f;
 
@@ -207,7 +205,8 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
                     float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
 
-                    curr_match_strength += 10.0f / log2f(col_offset);
+                    //curr_match_strength += 10.0f / log2f(col_offset + 2.0f);
+                    curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
                 }
             }
             
@@ -252,9 +251,31 @@ int apply_img_effects(const Img_Format *format, Color *rgb)
 {
     int result = 0;
 
-    result = draw_circle(format, rgb, 400, 250, 200, 5);
-    if (result  != 0)
-        return -1;
+    int r_i, r_str;
+    result = scan_for_dot(format, rgb, &r_i, &r_str);
+
+    if (r_i != -1 && r_str > 400)
+    {
+        printf("%d\n", r_str);
+        int 
+            x = r_i % format->width, 
+            y = r_i / format->width;
+
+        for (int o_y = MAX(y - 3, 0); o_y < MIN(y + 3, format->height); o_y++)
+        {
+            for (int o_x = MAX(x - 3, 0); o_x < MIN(x + 3, format->width); o_x++)
+            {
+                int i_offset = o_x + o_y * format->width;
+
+                rgb[i_offset] = (Color){0, 0, 255};
+            }
+        }
+        
+        result = draw_circle(format, rgb, x, y, 25, (r_str / 50) + 1);
+        if (result  != 0)
+            return -1;
+    }
+
 
     return 0;
 }
