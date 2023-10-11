@@ -1,20 +1,21 @@
-// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c img_data.c webcam_handler.c img_processing.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // valgrind --leak-check=full --track-origins=yes -s ./release
 
-// gcc -Wall -g main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c img_data.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
-// gcc main.c jpegutils.c webcam_handler.c color_data.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc main.c jpegutils.c img_data.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
 
-#define USE_THREADS
+//#define USE_THREADS
 
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-#include "color_data.h"
+#include "img_data.h"
 #include "webcam_handler.h"
+#include "img_processing.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,16 +36,16 @@
 #include <pthread.h>
 
 
-#define PI 3.14159265358979323846
 
-#define IMG_WIDTH 640
-#define IMG_HEIGHT 360
+#define IMG_WIDTH 1280 // 320 640 800 1280
+#define IMG_HEIGHT 720 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
+#define TIMED_FRAMES 128
 
 typedef struct Timer_Data
 {
-    double frame_times[512];
+    double frame_times[TIMED_FRAMES];
     double yuyv_converts[256];
 
     double tot_time;
@@ -56,7 +57,7 @@ typedef struct Timer_Data
 typedef struct Save_Img_Thread_Data
 {
     unsigned int frame_num;
-    RGB *rgb_copy;
+    Color *rgb_copy;
 } Save_Img_Thread_Data;
 
 typedef struct AABB
@@ -87,40 +88,27 @@ AABB AABB_combine(AABB box1, AABB box2)
 }
 
 
-void col_manip_add_circle(RGB *rgb, int x, int y, int r, int w)
+int process_image(const Img_Format *format, Color *rgb)
 {
-    for (float angle = 0.0f; angle < PI * 2.0f; angle += 1.0f / ((float)(r + w) * PI))
-    {
-        for (int j = 0; j < w; j++)
-        {
-            int x_offset = x + (int)(cosf(angle) * (float)(r + j));
-            int y_offset = y + (int)(sinf(angle) * (float)(r + j));
+    unsigned char *mjpeg = NULL;
+    unsigned int mjpeg_size;
 
-            if (x_offset < 0 || x_offset >= IMG_WIDTH)
-                continue;
-            if (y_offset < 0 || y_offset >= IMG_HEIGHT)
-                continue;
+    int result = get_frame(&mjpeg, &mjpeg_size);
+    if (result == -1)
+        return -1;
 
-            int i = x_offset + y_offset * IMG_WIDTH;
+    result = mjpeg_to_rgb(mjpeg, mjpeg_size, format, rgb);
+    if (result == -1)
+        return -1;
 
-            rgb[i].R = 255;
-            rgb[i].G = 0;
-            rgb[i].B = 0;
-        }
-    }
-}
-
-
-int process_image(RGB *rgb)
-{
-    int conversion_result = mjpeg_to_rgb(rgb);
-    if (conversion_result == -1)
+    result = apply_img_effects(format, rgb);
+    if (result == -1)
         return -1;
 
     return 0;
 }
 
-int save_png(RGB *rgb, char *name)
+int save_png(Color *rgb, char *name)
 {
     char *file_name = malloc(strlen(name) + strlen(".png") + 1);
 
@@ -165,11 +153,9 @@ void *threaded_save_png(void *input)
 
 int start_snatching(Timer_Data *timer)
 {
-    img_format.width = IMG_WIDTH;
-    img_format.height = IMG_HEIGHT;
-    img_format.size = IMG_SIZE;
+    Img_Format format = (Img_Format){ IMG_WIDTH, IMG_HEIGHT, IMG_SIZE };
 
-    if (webcam_init() == -1) return -1;
+    if (webcam_init(&format) == -1) return -1;
 
     printf("\nOpening Window...\n");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) 
@@ -205,7 +191,7 @@ int start_snatching(Timer_Data *timer)
 
     printf("\n{\n");
 
-    unsigned int frame_i = 0;
+    unsigned short frame_i = 0;
     unsigned char img_num = 0;
 
     double curr_frame_time = 0;
@@ -214,8 +200,6 @@ int start_snatching(Timer_Data *timer)
     bool escape = false;
     while (!escape)
     {
-        frame_i++;
-
         for (int i = 0; i < key_count; i++)
             last_state[i] = state[i];
         SDL_PumpEvents();
@@ -236,13 +220,13 @@ int start_snatching(Timer_Data *timer)
             return -1;
         }
 
-
-        if (timer->frame_count < 512)
-            curr_frame_time = omp_get_wtime();
-
         // Begin image manipulation.
-        RGB *rgb = (RGB*)window_pixels;
-        if (process_image(rgb) == -1) 
+        if (frame_i < TIMED_FRAMES)
+            curr_frame_time = omp_get_wtime();
+        
+        Color rgb[IMG_SIZE];
+
+        if (process_image(&format, rgb) == -1) 
             return -1;
 
         // Checks if space was pressed this frame
@@ -251,7 +235,7 @@ int start_snatching(Timer_Data *timer)
             printf("Saving Frame %d...\n", img_num);
 
         #ifdef USE_THREADS
-            RGB *rgb_copy = malloc(IMG_SIZE * sizeof(RGB));
+            Color *rgb_copy = malloc(IMG_SIZE * sizeof(Color));
             for (int i = 0; i < IMG_SIZE; i++)
                 rgb_copy[i] = rgb[i];
             
@@ -274,13 +258,16 @@ int start_snatching(Timer_Data *timer)
                 return -1;
         #endif
         }
+        
+        for (int i = 0; i < IMG_SIZE; i++)
+        {
+            Color *window_rgb = &((Color*)window_pixels)[i];
+            *window_rgb = rgb[i];
+        }
+        
+        if (frame_i < TIMED_FRAMES)
+            timer->frame_times[frame_i] = (omp_get_wtime() - curr_frame_time) * 1000.0;
         // End image manipulation.
-
-        if (timer->frame_count == 512 - 1)
-            printf("cap reached.\n");
-        if (timer->frame_count < 512)
-            timer->frame_times[timer->frame_count++] = (omp_get_wtime() - curr_frame_time) * 1000.0;
-            
 
         if (close_frame() == -1) return -1;
 
@@ -297,9 +284,20 @@ int start_snatching(Timer_Data *timer)
         }
 
         SDL_RenderPresent(g_renderer);
+
+
+        if (frame_i < TIMED_FRAMES)
+        {
+            if (frame_i == TIMED_FRAMES - 1 || escape)
+            {
+                printf("cap reached.\n");
+                timer->tot_time = (omp_get_wtime() - start_time) * 1000.0 / (double)frame_i;
+                escape = true;
+            }
+            timer->frame_count = ++frame_i;
+        }
     }
     printf("}\n");
-    timer->tot_time = (omp_get_wtime() - start_time) * 1000.0 / (double)frame_i;
 
     free(last_state);
 

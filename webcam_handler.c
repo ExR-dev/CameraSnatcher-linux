@@ -2,8 +2,7 @@
 #define USE_THREADS
 
 #include "webcam_handler.h"
-#include "color_data.h"
-#include "jpegutils.h"
+#include "img_data.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,10 +17,18 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
-#include <omp.h>
 #include <linux/videodev2.h>
-//#include <jpeglib.h>
-//#include <jerror.h>
+#include <omp.h>
+#include <pthread.h>
+
+
+typedef struct Capture_Data
+{
+    int handle;
+    unsigned char *img_mem[2];
+} Capture_Data;
+
+static Capture_Data capture_data;
 
 
 typedef struct V4L2_Container
@@ -33,58 +40,18 @@ typedef struct V4L2_Container
     struct v4l2_buffer queue_buffer;
 } V4L2_Container;
 
-Img_Format img_format;
-Capture_Data capture_data;
 static V4L2_Container v4l2_container;
 
 
-// Boilerplate code for using jpeglib.
-/*typedef struct 
-{
-    struct jpeg_source_mgr pub;
-
-    JOCTET *buffer;
-    boolean start_of_file;
-} my_source_mgr;
-
-typedef my_source_mgr * my_src_ptr;
-
-static void jpg_memInitSource(j_decompress_ptr cinfo)
-{
-    my_src_ptr src = (my_src_ptr)cinfo->src;
-    src->start_of_file = TRUE;
-}
-
-static boolean jpg_memFillInputBuffer(j_decompress_ptr cinfo)
-{
-    my_src_ptr src = (my_src_ptr)cinfo->src;
-    src->start_of_file = FALSE;
-    return TRUE;
-}
-
-static void jpg_memSkipInputData(j_decompress_ptr cinfo, long num_bytes)
-{
-    my_src_ptr src = (my_src_ptr)cinfo->src;
-    if (num_bytes > 0) 
-    {
-        src->pub.next_input_byte += (size_t)num_bytes;
-        src->pub.bytes_in_buffer -= (size_t)num_bytes;
-    }
-}
-
-static void jpg_memTermSource(j_decompress_ptr cinfo) { }*/
-// Boilerplate code for using jpeglib.
-
-
 /// @brief Tells the camera device what video format to use.
-int _set_supported_video_format()
+int _set_supported_video_format(const Img_Format *format)
 {
     // Overwrite memory in format with 0.
     memset(&v4l2_container.format, 0, sizeof(v4l2_container.format));
 
     v4l2_container.format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    v4l2_container.format.fmt.pix.width = img_format.width;
-    v4l2_container.format.fmt.pix.height = img_format.height;
+    v4l2_container.format.fmt.pix.width = format->width;
+    v4l2_container.format.fmt.pix.height = format->height;
     v4l2_container.format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
     v4l2_container.format.fmt.pix.field = V4L2_FIELD_NONE;
 
@@ -202,23 +169,12 @@ int _requeue_buffer()
     return 0;
 }
 
-void _yuyv_to_rgb(unsigned char y, unsigned char u, unsigned char v, RGB *_rgb)
-{
-    int c = y - 16;
-    int d = u - 128;
-    int e = v - 128;
 
-    _rgb->R = MAX(0, MIN((298 * c + 516 * d + 128) >> 8, 255));
-    _rgb->G = MAX(0, MIN((298 * c - 100 * d - 208 * e + 128) >> 8, 255));
-    _rgb->B = MAX(0, MIN((298 * c + 409 * e + 128) >> 8, 255));
-}
-
-
-int webcam_init()
+int webcam_init(const Img_Format *format)
 {
     capture_data.handle = open("/dev/video0", O_RDWR, 0);
 
-    if (_set_supported_video_format() == -1) 
+    if (_set_supported_video_format(format) == -1) 
         return -1;
 
     if (_request_buffers() == -1) 
@@ -246,83 +202,17 @@ int next_frame()
     return 0;
 }
 
+int get_frame(unsigned char **mjpeg, unsigned int *mjpeg_size)
+{
+    *mjpeg = capture_data.img_mem[v4l2_container.queue_buffer.index];
+    *mjpeg_size = v4l2_container.queue_buffer.bytesused;
+    return 0;
+}
+
 int close_frame()
 {
     if (_requeue_buffer() == -1) 
         return -1;
-
-    return 0;
-}
-
-int mjpeg_to_rgb(RGB *rgb)
-{
-    const unsigned char *mjpeg = capture_data.img_mem[v4l2_container.queue_buffer.index];
-    int size = v4l2_container.queue_buffer.bytesused;
-
-    unsigned char 
-        col_y[img_format.size],
-        col_u[img_format.size],
-        col_v[img_format.size];
-
-    int result = decode_jpeg_raw(
-        (unsigned char*)mjpeg, 
-        size, 
-        0, Y4M_CHROMA_422, 
-        img_format.width, img_format.height, 
-        col_y, col_u, col_v);
-
-    if (result != 0)
-        printf("Error in decode_jpeg_raw: %d\n",result);
-
-    int yuv_size = img_format.width * img_format.height / 2;
-
-#ifdef USE_THREADS
-    printf("pixels: %d\n", yuv_size);
-    
-    #define NUM_THREADS 8
-    #pragma omp parallel num_threads(NUM_THREADS)
-    {
-        int t_id = omp_get_thread_num();
-        printf("Converting %d - %d\n", yuv_size * t_id / NUM_THREADS, yuv_size * (t_id + 1) / NUM_THREADS);
-        for (int i = yuv_size * t_id / NUM_THREADS; i < yuv_size * (t_id + 1) / NUM_THREADS; i++)
-        {
-            unsigned char 
-                y1 = col_y[i * 2],
-                y2 = col_y[i * 2 + 1],
-                u = col_u[i],
-                v = col_v[i];
-
-            _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
-            _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
-        }
-    }
-
-    printf(".\n");
-    /*#pragma omp parallel for //num_threads(NUM_THREADS)
-        for (int i = 0; i < yuv_size; i++)
-        {
-            unsigned char 
-                y1 = col_y[i * 2],
-                y2 = col_y[i * 2 + 1],
-                u = col_u[i],
-                v = col_v[i];
-
-            _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
-            _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
-        }*/
-#else
-    for (int i = 0; i < yuv_size; i++)
-    {
-        unsigned char 
-            y1 = col_y[i * 2],
-            y2 = col_y[i * 2 + 1],
-            u = col_u[i],
-            v = col_v[i];
-
-        _yuyv_to_rgb(y1, u, v, &rgb[i * 2]);
-        _yuyv_to_rgb(y2, u, v, &rgb[i * 2 + 1]);
-    }
-#endif
 
     return 0;
 }

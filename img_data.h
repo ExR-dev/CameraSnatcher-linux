@@ -1,18 +1,27 @@
-#ifndef INCLUDE_COLOR_DATA_H
-#define INCLUDE_COLOR_DATA_H
+#ifndef INCLUDE_IMG_DATA_H
+#define INCLUDE_IMG_DATA_H
 
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 #define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
 #define LERP(a, b, t) (a * (1.0 - t) + (b * t))
 
+#define PI 3.14159265358979323846
 
-typedef struct RGB
+
+typedef struct Img_Format
+{
+    unsigned int width;
+    unsigned int height;
+    unsigned int size;
+} Img_Format;
+
+typedef struct Color
 {
     unsigned char B;
     unsigned char G;
     unsigned char R;
-} RGB;
+} Color;
 
 typedef struct HSV
 {
@@ -22,8 +31,8 @@ typedef struct HSV
 } HSV;
 
 
-HSV rgb_to_hsv(RGB rgb);
+HSV rgb_to_hsv(Color rgb);
 
-RGB hsv_to_rgb(HSV hsv);
+Color hsv_to_rgb(HSV hsv);
 
 #endif

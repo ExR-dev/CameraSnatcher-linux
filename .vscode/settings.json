@@ -62,12 +62,16 @@
     "videodev2.h": "c",
     "jpeglib.h": "c",
     "string.h": "c",
-    "color_data.h": "c",
+    "img_data.h": "c",
     "sdl.h": "c",
     "stdio.h": "c",
     "stdbool.h": "c",
     "math.h": "c",
-    "stdlib.h": "c"
+    "stdlib.h": "c",
+    "jpegutils.h": "c",
+    "pthread.h": "c",
+    "img_processing.h": "c",
+    "omp.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }

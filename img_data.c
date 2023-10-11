@@ -1,12 +1,12 @@
 
 #define USE_THREADS
 
-#include "color_data.h"
+#include "img_data.h"
 
 #include <math.h>
 
 
-HSV rgb_to_hsv(RGB rgb) 
+HSV rgb_to_hsv(Color rgb) 
 {
     float 
         r = rgb.R / 255.0f, 
@@ -31,7 +31,7 @@ HSV rgb_to_hsv(RGB rgb)
     return (HSV){h, s, v};
 }
 
-RGB hsv_to_rgb(HSV hsv)
+Color hsv_to_rgb(HSV hsv)
 {
     float r = 0.0f, g = 0.0f, b = 0.0f;
 
@@ -99,7 +99,7 @@ RGB hsv_to_rgb(HSV hsv)
 
 	}
 
-	RGB rgb = {
+	Color rgb = {
         r * 255,
         g * 255,
         b * 255
