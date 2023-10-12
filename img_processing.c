@@ -97,8 +97,13 @@ Color _desired_col_at_dist(float dist, float max_dist)
 
 int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int* result_str)
 {
-    int dot_radius = 20;
-    float max_dist = sqrtf(dot_radius * dot_radius);
+    float 
+        dot_radius = 20.0f,
+        dot_radius_sqr = dot_radius * dot_radius;
+    
+    /*float 
+        max_dist_sqr = dot_radius_sqr + dot_radius_sqr,
+        max_dist = sqrtf(max_dist_sqr);*/
 
     *result_str = -1, 
     *result_i = -1;
@@ -113,44 +118,65 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
     #pragma omp parallel num_threads(thread_count)
     {
-        int 
+        unsigned int 
             t_id = omp_get_thread_num(), 
             start_i = format->size * t_id / thread_count, 
-            end_i = format->size * (t_id + 1) / thread_count;
+            end_i = format->size * (t_id + 1) / thread_count,
+            match_count = 0;
 
         best_match_strength[t_id] = -1,
         best_match_index[t_id] = -1;
 
         for (int i = start_i; i < end_i; i++)
         {
-            if (rgb[i].R == 255 && rgb[i].G >= 254 && rgb[i].B >= 254)
+            if (rgb[i].R == 255 && rgb[i].G >= 255 && rgb[i].B >= 255)
             {
-                i += 7;
+                i += 3;
+                i += log2((++match_count / 5) + 2);
 
                 int 
                     i_x = i % format->width, 
-                    i_y = (i/* - i_x*/) / format->width;
+                    i_y = i / format->width;
 
                 float curr_match_strength = 0.0f;
+                unsigned int iteration_count = 0;
 
                 // Loop over all pixels within a 2 * dot_radius square of the current pixel,
                 // skipping any pixels that fall outside the image.
-                for (int o_y = MAX(i_y - dot_radius, 0); o_y < MIN(i_y + dot_radius, format->height); o_y++)
+                for (int o_y = MAX(i_y - (int)dot_radius, 0); 
+                    o_y < MIN(i_y + (int)dot_radius, format->height); 
+                    o_y++)
                 {
-                    for (int o_x = MAX(i_x - dot_radius, 0); o_x < MIN(i_x + dot_radius, format->width); o_x++)
+                    for (int o_x = MAX(i_x - (int)dot_radius, 0); 
+                        o_x < MIN(i_x + (int)dot_radius, format->width); 
+                        o_x++)
                     {
+                        if (iteration_count++ % 2 == 0)
+                            continue;
+
+                        float center_dist_sqr = (float)((o_x - i_x) * (o_x - i_x) + (o_y - i_y) * (o_y - i_y));
+                        if (center_dist_sqr > dot_radius_sqr)
+                            continue;
+
                         int i_offset = o_x + o_y * format->width;
+                        //float center_dist = sqrtf(center_dist_sqr);
 
-                        Color desired_col = _desired_col_at_dist(
-                            sqrtf((float)(
-                                (o_x - i_x) * (o_x - i_x)
-                              + (o_y - i_y) * (o_y - i_y))), 
-                            max_dist);
+                        //Color desired_col = _desired_col_at_dist(MIN(center_dist_sqr, dot_radius), dot_radius);
+                        //Color desired_col = _desired_col_at_dist(center_dist, dot_radius);
 
-                        float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
+                        //float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
+                        //float col_offset = color_distance(rgb[i_offset], desired_col);
+
+                        float white_offset = color_distance(rgb[i_offset], (Color){.R = 255, .G = 255, .B = 255});
+                        float red_offset = color_distance(rgb[i_offset], (Color){.R = 255, .G = 0, .B = 0});
+
+                        float white_impact = LERP(1.0f, -0.5f, center_dist_sqr / dot_radius_sqr);
+                        float red_impact = LERP(0.25f, 1.0f, center_dist_sqr / dot_radius_sqr);
 
                         //curr_match_strength += 100.0f / (log2f(col_offset + 2.0f) * log2f(col_offset + 1.0f));
-                        curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
+                        //curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
+                        //curr_match_strength += 100.0f / (col_offset + 1.0f);
+                        curr_match_strength += (white_offset * white_impact) + (red_offset * red_impact);
                     }
                 }
                 
@@ -254,7 +280,7 @@ int apply_img_effects(const Img_Format *format, Color *rgb)
     int r_i, r_str;
     result = scan_for_dot(format, rgb, &r_i, &r_str);
 
-    if (r_i != -1 && r_str > 400)
+    if (r_i != -1/* && r_str > 25*/)
     {
         printf("%d\n", r_str);
         int 
@@ -271,7 +297,7 @@ int apply_img_effects(const Img_Format *format, Color *rgb)
             }
         }
         
-        result = draw_circle(format, rgb, x, y, 25, (r_str / 50) + 1);
+        result = draw_circle(format, rgb, x, y, 25, log2(r_str / 100 + 2));
         if (result  != 0)
             return -1;
     }

@@ -114,3 +114,13 @@ float color_magnitude_sqr(Color col1, Color col2)
 		 + (col2.G - col1.G) * (col2.G - col1.G) 
 		 + (col2.B - col1.B) * (col2.B - col1.B);
 }
+
+float color_distance(Color col1, Color col2)
+{
+
+    float r_dist = fabsf(col1.R - col2.R);
+    float g_dist = fabsf(col1.G - col2.G);
+    float b_dist = fabsf(col1.B - col2.B);
+
+    return (r_dist + g_dist + b_dist);
+}

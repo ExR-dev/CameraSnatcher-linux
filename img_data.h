@@ -40,4 +40,6 @@ Color hsv_to_rgb(HSV hsv);
 
 float color_magnitude_sqr(Color col1, Color col2);
 
+float color_distance(Color col1, Color col2);
+
 #endif

@@ -41,15 +41,20 @@
 #define IMG_HEIGHT 480 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
-#define TIMED_FRAMES 128
+#define TIMED_FRAMES 256
 
 
 typedef struct Timer_Data
 {
-    double frame_times[TIMED_FRAMES];
     double tot_time;
 
+    double frame_times[TIMED_FRAMES];
+    double conversion_times[TIMED_FRAMES];
+    double scan_times[TIMED_FRAMES];
+
     unsigned short frame_count;
+    unsigned short conversion_count;
+    unsigned short scan_count;
 } Timer_Data;
 
 typedef struct Save_Img_Thread_Data
@@ -310,7 +315,7 @@ int start_snatching(Timer_Data *timer)
 int main(int argc, const char** argv)
 {     
     printf("\n======Start============\n");
-    Timer_Data timer = (Timer_Data){ {}, 0, 0 };
+    Timer_Data timer = (Timer_Data){ 0, {}, {}, {}, 0, 0, 0 };
     int handlerOut = start_snatching(&timer);
     printf("\n======Quit=============\n");
 
