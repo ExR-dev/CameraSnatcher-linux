@@ -88,22 +88,44 @@ int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format
     return 0;
 }
 
+unsigned char get_avg_luminance(const Img_Format *format, const Color *rgb, unsigned int pix_skip)
+{
+    unsigned int pix_count = 1;
+    unsigned int color_sum = 127;
+
+    for (int y = 0; y < format->height; y += 1 + pix_skip)
+    {
+        for (int x = 0; x < format->width; x += 1 + pix_skip)
+        {
+            int i = x + y * format->width;
+
+            color_sum += (rgb[i].R + rgb[i].G + rgb[i].B) / 3;
+            pix_count++;
+        }
+    }
+    
+    return color_sum / pix_count;
+}
+
 
 Color _desired_col_at_dist(float dist, float max_dist)
 {
-    unsigned char luminance = (unsigned char)LERP(255.0f, 0.0f, dist / max_dist);
+    unsigned char luminance = (unsigned char)LERP(255.0f, 127.0f, MIN(dist / max_dist, 1.0f));
     return (Color){ .R = 255, .G = luminance, .B = luminance};
 }
 
 int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int* result_str)
 {
-    float 
-        dot_radius = 20.0f,
+    /*float 
+        dot_radius = 5.0f,
         dot_radius_sqr = dot_radius * dot_radius;
     
-    /*float 
+    float 
         max_dist_sqr = dot_radius_sqr + dot_radius_sqr,
         max_dist = sqrtf(max_dist_sqr);*/
+
+    int dot_radius = 20;
+    float max_dist = sqrtf(dot_radius * dot_radius);
 
     *result_str = -1, 
     *result_i = -1;
@@ -129,17 +151,17 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
 
         for (int i = start_i; i < end_i; i++)
         {
-            if (rgb[i].R == 255 && rgb[i].G >= 255 && rgb[i].B >= 255)
+            if (rgb[i].R == 255 && rgb[i].G >= 253 && rgb[i].B >= 254)
             {
-                i += 3;
-                i += log2((++match_count / 5) + 2);
+                i += 5;
+                i += log2((++match_count / 10) + 2);
 
                 int 
                     i_x = i % format->width, 
                     i_y = i / format->width;
 
                 float curr_match_strength = 0.0f;
-                unsigned int iteration_count = 0;
+                //unsigned int iteration_count = 0;
 
                 // Loop over all pixels within a 2 * dot_radius square of the current pixel,
                 // skipping any pixels that fall outside the image.
@@ -151,32 +173,43 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
                         o_x < MIN(i_x + (int)dot_radius, format->width); 
                         o_x++)
                     {
-                        if (iteration_count++ % 2 == 0)
-                            continue;
+                        /*if (iteration_count++ % 2 == 0)
+                            continue;*/
 
-                        float center_dist_sqr = (float)((o_x - i_x) * (o_x - i_x) + (o_y - i_y) * (o_y - i_y));
-                        if (center_dist_sqr > dot_radius_sqr)
-                            continue;
+                        //float center_dist_sqr = (float)((o_x - i_x) * (o_x - i_x) + (o_y - i_y) * (o_y - i_y));
+                        /*if (center_dist_sqr > dot_radius_sqr)
+                            continue;*/
 
                         int i_offset = o_x + o_y * format->width;
                         //float center_dist = sqrtf(center_dist_sqr);
 
                         //Color desired_col = _desired_col_at_dist(MIN(center_dist_sqr, dot_radius), dot_radius);
-                        //Color desired_col = _desired_col_at_dist(center_dist, dot_radius);
+                        //Color desired_col = _desired_col_at_dist(center_dist_sqr, dot_radius);
 
                         //float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
                         //float col_offset = color_distance(rgb[i_offset], desired_col);
 
-                        float white_offset = color_distance(rgb[i_offset], (Color){.R = 255, .G = 255, .B = 255});
+                        /*float white_offset = color_distance(rgb[i_offset], (Color){.R = 255, .G = 255, .B = 255});
                         float red_offset = color_distance(rgb[i_offset], (Color){.R = 255, .G = 0, .B = 0});
 
                         float white_impact = LERP(1.0f, -0.5f, center_dist_sqr / dot_radius_sqr);
-                        float red_impact = LERP(0.25f, 1.0f, center_dist_sqr / dot_radius_sqr);
+                        float red_impact = LERP(0.25f, 1.0f, center_dist_sqr / dot_radius_sqr);*/
 
                         //curr_match_strength += 100.0f / (log2f(col_offset + 2.0f) * log2f(col_offset + 1.0f));
                         //curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
                         //curr_match_strength += 100.0f / (col_offset + 1.0f);
-                        curr_match_strength += (white_offset * white_impact) + (red_offset * red_impact);
+                        //curr_match_strength += (white_offset * white_impact) + (red_offset * red_impact);
+
+
+                        Color desired_col = _desired_col_at_dist(
+                            sqrtf((float)(
+                                (o_x - i_x) * (o_x - i_x)
+                              + (o_y - i_y) * (o_y - i_y))), 
+                            max_dist);
+
+                        float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
+
+                        curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
                     }
                 }
                 
@@ -207,7 +240,7 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int*
     {
         if (rgb[i].R == 255 && rgb[i].G >= 254 && rgb[i].B >= 254)
         {
-            i += 7;
+            i += 5;
 
             int 
                 i_x = i % format->width, 
@@ -280,14 +313,14 @@ int apply_img_effects(const Img_Format *format, Color *rgb)
     int r_i, r_str;
     result = scan_for_dot(format, rgb, &r_i, &r_str);
 
-    if (r_i != -1/* && r_str > 25*/)
+    if (r_i != -1 /*&& r_str > 500*/)
     {
-        printf("%d\n", r_str);
+        //printf("%d\n", r_str);
         int 
             x = r_i % format->width, 
             y = r_i / format->width;
 
-        for (int o_y = MAX(y - 3, 0); o_y < MIN(y + 3, format->height); o_y++)
+        /*for (int o_y = MAX(y - 3, 0); o_y < MIN(y + 3, format->height); o_y++)
         {
             for (int o_x = MAX(x - 3, 0); o_x < MIN(x + 3, format->width); o_x++)
             {
@@ -295,9 +328,10 @@ int apply_img_effects(const Img_Format *format, Color *rgb)
 
                 rgb[i_offset] = (Color){0, 0, 255};
             }
-        }
+        }*/
         
-        result = draw_circle(format, rgb, x, y, 25, log2(r_str / 100 + 2));
+        result = draw_circle(format, rgb, x, y, 15, (r_str / 75) + 1);
+        //result = draw_circle(format, rgb, x, y, 25, log2(r_str / 100 + 2));
         if (result  != 0)
             return -1;
     }

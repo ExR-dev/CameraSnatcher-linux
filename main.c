@@ -190,6 +190,7 @@ int start_snatching(Timer_Data *timer)
 
     double curr_frame_time = 0;
     double start_time = omp_get_wtime();
+    unsigned char luminance = 127;
 
     bool escape = false;
     while (!escape)
@@ -222,6 +223,9 @@ int start_snatching(Timer_Data *timer)
 
         if (process_image(&format, rgb) == -1) 
             return -1;
+
+        //luminance = get_avg_luminance(&format, rgb, 20);
+        //printf("Lum: %d\n", luminance);
 
         // Checks if space was pressed this frame
         if (state[SDL_SCANCODE_SPACE] == 1 && last_state[SDL_SCANCODE_SPACE] == 0)
@@ -257,8 +261,6 @@ int start_snatching(Timer_Data *timer)
         {
             Color *window_rgb = &((Color*)window_pixels)[i];
             *window_rgb = rgb[i];
-            //*window_rgb = (Color){rgb[i].B, rgb[i].G, rgb[i].R};
-            //*window_rgb = (Color){rgb[i].R, rgb[i].G, rgb[i].B};
         }
         
         if (frame_i < TIMED_FRAMES)
