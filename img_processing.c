@@ -14,7 +14,6 @@
 #include <math.h>
 
 #include <omp.h>
-#include <pthread.h>
 
 
 void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned char v, Color *rgb)
@@ -104,25 +103,6 @@ int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format
     return 0;
 }
 
-unsigned char get_avg_luminance(const Img_Format *format, const Color *rgb, unsigned int pix_skip)
-{
-    unsigned int pix_count = 1;
-    unsigned int color_sum = 127;
-
-    for (int y = 0; y < format->height; y += 1 + pix_skip)
-    {
-        for (int x = 0; x < format->width; x += 1 + pix_skip)
-        {
-            int i = x + y * format->width;
-
-            color_sum += (rgb[i].R + rgb[i].G + rgb[i].B) / 3;
-            pix_count++;
-        }
-    }
-    
-    return color_sum / pix_count;
-}
-
 
 Color _desired_col_at_dist(float dist, float max_dist)
 {
@@ -130,81 +110,101 @@ Color _desired_col_at_dist(float dist, float max_dist)
     return (Color){ .R = 255, .G = luminance, .B = luminance};
 }
 
-int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int *result_str)
-{    
-    int dot_radius = 20;
-    float max_dist = (float)dot_radius;
-
-    *result_str = -1, 
-    *result_i = -1;
-
-    // Single-threaded
+int _compare_match_strength(
+    const Img_Format *format, const Color *rgb, float scan_radius, 
+    int *i, int *res_str, int *res_i)
+{
+    if (rgb[*i].R == 255 && rgb[*i].G >= 253 && rgb[*i].B >= 254)
     {
-        timer_begin_measure(SCAN);
+        *i += 7;
 
-        for (int i = 0; i < format->size; i++)
+        int 
+            i_x = *i % format->width, 
+            i_y = *i / format->width;
+
+        float curr_str = 0.0f;
+        unsigned int iter_count = 0;
+
+        // Loop over all pixels within a 2 * scan_radius square of the given pixel,
+        // skipping any pixel that is outside the bounds of the image or does not fall in the correct color range.
+        for (int o_y = MAX(i_y - (int)scan_radius, 0); 
+            o_y < MIN(i_y + (int)scan_radius, format->height); 
+            o_y++)
         {
-            if (rgb[i].R == 255 && rgb[i].G >= 253 && rgb[i].B >= 254)
+            for (int o_x = MAX(i_x - (int)scan_radius, 0); 
+                o_x < MIN(i_x + (int)scan_radius, format->width); 
+                o_x++)
             {
-                i += 7;
+                // Skip every even pixel for better performance.
+                if (iter_count++ % 2 == 0)
+                    continue;
 
-                int 
-                    i_x = i % format->width, 
-                    i_y = i / format->width;
+                int i_offset = o_x + o_y * format->width;
 
-                float curr_match_strength = 0.0f;
-                unsigned int iteration_count = 0;
+                // Early elimination of non-red pixels.
+                if (rgb[i_offset].R + 3 <= rgb[i_offset].G || 
+                    rgb[i_offset].R + 3 <= rgb[i_offset].B ||
+                    rgb[i_offset].R <= 225)
+                    continue;
 
-                // Loop over all pixels within a 2 * dot_radius square of the current pixel,
-                // skipping any pixels that fall outside the image.
-                for (int o_y = MAX(i_y - (int)dot_radius, 0); 
-                    o_y < MIN(i_y + (int)dot_radius, format->height); 
-                    o_y++)
-                {
-                    for (int o_x = MAX(i_x - (int)dot_radius, 0); 
-                        o_x < MIN(i_x + (int)dot_radius, format->width); 
-                        o_x++)
-                    {
-                        if (iteration_count++ % 2 == 0)
-                            continue;
+                float center_dist_sqr = (float)(
+                    (o_x - i_x) * (o_x - i_x) + 
+                    (o_y - i_y) * (o_y - i_y));
+                float center_dist = sqrtf(center_dist_sqr);
 
-                        int i_offset = o_x + o_y * format->width;
-                        if (rgb[i_offset].R + 3 <= rgb[i_offset].G || 
-                            rgb[i_offset].R + 3 <= rgb[i_offset].B ||
-                            rgb[i_offset].R <= 225)
-                            continue;
+                // Gets the optimal color at a given distance from the center.
+                // Pixels near the center should be white, while pixels far away should be red.
+                Color desired_col = _desired_col_at_dist(center_dist, scan_radius);
 
-                        float center_dist_sqr = (float)((o_x - i_x) * (o_x - i_x) + (o_y - i_y) * (o_y - i_y));
-                        /*if (center_dist_sqr > dot_radius_sqr)
-                            continue;*/
-                        float center_dist = sqrtf(center_dist_sqr);
-
-                        Color desired_col = _desired_col_at_dist(center_dist, max_dist);
-                        float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
-
-                        curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
-                    }
-                }
-                
-                if (curr_match_strength > (float)*result_str)
-                {
-                    *result_str = (int)curr_match_strength;
-                    *result_i = i;
-                }
+                // Compares the optimal color with the actual color.
+                // Increases the total strength by an amount inversely proportional to the deviation from desired_col.
+                float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
+                curr_str += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
             }
         }
-        timer_end_measure(SCAN);
+        
+        if (curr_str > (float)*res_str)
+        {
+            *res_str = (int)curr_str;
+            *res_i = *i;
+        }
     }
+
+    return 0;
+}
+
+int scan_for_dot(const Img_Format *format, const Color *rgb, int *res_i, int *res_str)
+{    
+    int scan_radius = 20;
+
+    *res_str = -1, 
+    *res_i = -1;
+
+    // Single-threaded
+    timer_begin_measure(SCAN);
+    {
+        for (int i = 0; i < format->size; i++)
+        {
+            _compare_match_strength(
+                format, rgb, scan_radius, 
+                &i, res_str, res_i
+            );
+        }
+    }
+    timer_end_measure(SCAN);
+
+
+    *res_str = -1, 
+    *res_i = -1;
     
     // Multi-threaded:
+    timer_begin_measure(T_SCAN);
     {
-        timer_begin_measure(T_SCAN);
-
         const unsigned char thread_count = 4;
 
         int
-            best_match_strength[thread_count],
-            best_match_index[thread_count];
+            best_str[thread_count],
+            best_i[thread_count];
 
         #pragma omp parallel num_threads(thread_count)
         {
@@ -213,95 +213,60 @@ int scan_for_dot(const Img_Format *format, const Color *rgb, int *result_i, int 
                 start_i = format->size * t_id / thread_count, 
                 end_i = format->size * (t_id + 1) / thread_count;
 
-            best_match_strength[t_id] = -1,
-            best_match_index[t_id] = -1;
+            best_str[t_id] = -1,
+            best_i[t_id] = -1;
 
             for (int i = start_i; i < end_i; i++)
             {
-                if (rgb[i].R == 255 && rgb[i].G >= 253 && rgb[i].B >= 254)
-                {
-                    i += 7;
-
-                    int 
-                        i_x = i % format->width, 
-                        i_y = i / format->width;
-
-                    float curr_match_strength = 0.0f;
-                    unsigned int iteration_count = 0;
-
-                    // Loop over all pixels within a 2 * dot_radius square of the current pixel,
-                    // skipping any pixels that fall outside the image.
-                    for (int o_y = MAX(i_y - (int)dot_radius, 0); 
-                        o_y < MIN(i_y + (int)dot_radius, format->height); 
-                        o_y++)
-                    {
-                        for (int o_x = MAX(i_x - (int)dot_radius, 0); 
-                            o_x < MIN(i_x + (int)dot_radius, format->width); 
-                            o_x++)
-                        {
-                            if (iteration_count++ % 2 == 0)
-                                continue;
-
-                            int i_offset = o_x + o_y * format->width;
-                            if (rgb[i_offset].R + 3 <= rgb[i_offset].G || 
-                                rgb[i_offset].R + 3 <= rgb[i_offset].B ||
-                                rgb[i_offset].R <= 225)
-                                continue;
-
-                            float center_dist_sqr = (float)((o_x - i_x) * (o_x - i_x) + (o_y - i_y) * (o_y - i_y));
-                            /*if (center_dist_sqr > dot_radius_sqr)
-                                continue;*/
-                            float center_dist = sqrtf(center_dist_sqr);
-
-                            Color desired_col = _desired_col_at_dist(center_dist, max_dist);
-                            float col_offset = color_magnitude_sqr(rgb[i_offset], desired_col);
-
-                            curr_match_strength += 100.0f / (col_offset / (log2f(col_offset + 2.0f)) + 1.0f);
-                        }
-                    }
-                    
-                    if (curr_match_strength > (float)best_match_strength[t_id])
-                    {
-                        best_match_strength[t_id] = (int)curr_match_strength;
-                        best_match_index[t_id] = i;
-                    }
-                }
+                _compare_match_strength(
+                    format, rgb, scan_radius, 
+                    &i, &(best_str[t_id]), &(best_i[t_id])
+                );
             }
         }
 
         for (int i = 0; i < thread_count; i++)
         {
-            if (best_match_strength[i] > *result_str)
+            if (best_str[i] > *res_str)
             {
-                *result_str = best_match_strength[i];
-                *result_i = best_match_index[i];
+                *res_str = best_str[i];
+                *res_i = best_i[i];
             }
         }
-
-        timer_end_measure(T_SCAN);
     }
+    timer_end_measure(T_SCAN);
     return 0;
 }
 
 int draw_circle(const Img_Format *format, Color *rgb, int x, int y, int r, int w)
 {
-    for (float angle = 0.0f; angle < PI * 2.0f; angle += 1.0f / ((float)(r + w) * PI))
+    for (float angle = 0.0f; angle < PI / 2.0f; angle += 1.0f / ((float)(r + w) * PI))
     {
-        for (int j = 0; j < w; j++)
+        float 
+            ang_cos = cosf(angle),
+            ang_sin = sinf(angle);
+
+        for (int y_flip = -1; y_flip <= 1; y_flip += 2)
         {
-            int x_offset = x + (int)(cosf(angle) * (float)(r + j));
-            int y_offset = y + (int)(sinf(angle) * (float)(r + j));
+            for (int x_flip = -1; x_flip <= 1; x_flip += 2)
+            {
+                for (int j = 0; j < w; j++)
+                {
+                    int x_offset = x + x_flip * (int)(ang_cos * (float)(r + j));
+                    int y_offset = y + y_flip * (int)(ang_sin * (float)(r + j));
 
-            if (x_offset < 0 || x_offset >= format->width)
-                continue;
-            if (y_offset < 0 || y_offset >= format->height)
-                continue;
+                    if (x_offset < 0 || x_offset >= format->width)
+                        break;
+                    if (y_offset < 0 || y_offset >= format->height)
+                        break;
 
-            int i = x_offset + y_offset * format->width;
+                    int i = x_offset + y_offset * format->width;
 
-            rgb[i].R = 255;
-            rgb[i].G = 0;
-            rgb[i].B = 0;
+                    rgb[i].R = 255;
+                    rgb[i].G = 0;
+                    rgb[i].B = 0;
+                }
+            }
         }
     }
 
