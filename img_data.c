@@ -25,8 +25,8 @@ HSV rgb_to_hsv(Color rgb)
     else if (max == b)	h = fmodf((60.0f * ((r - g) / diff) + 240.0f), 360.0f);
 	else				h = 0.0f;
 
-    s = (max == 0.0f) ? (0.0f) : ((diff / max) * 100.0f);
-    v = max * 100.0f;
+    s = (max == 0.0f) ? (0.0f) : ((diff / max) * 1.0f);
+    v = max;
 
     return (HSV){h, s, v};
 }

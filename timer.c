@@ -17,6 +17,7 @@ typedef struct Timer_Data
 
 
     double frame_times[TIMED_FRAMES];
+    double manipulation_times[TIMED_FRAMES];
 
     double conversion_times[TIMED_FRAMES];
     double t_conversion_times[TIMED_FRAMES];
@@ -26,6 +27,7 @@ typedef struct Timer_Data
 
 
     unsigned short frame_count;
+    unsigned short manipulation_count;
     unsigned short conversion_count;
     unsigned short t_conversion_count;
     unsigned short scan_count;
@@ -52,6 +54,11 @@ int timer_begin_measure(enum timer_type type)
     case FRAME:
         count = &timer.frame_count;
         times = timer.frame_times;
+        break;
+
+    case MANIPULATION:
+        count = &timer.manipulation_count;
+        times = timer.manipulation_times;
         break;
 
     case CONVERSION:
@@ -99,6 +106,11 @@ int timer_end_measure(enum timer_type type)
         times = timer.frame_times;
         break;
 
+    case MANIPULATION:
+        count = &timer.manipulation_count;
+        times = timer.manipulation_times;
+        break;
+
     case CONVERSION:
         count = &timer.conversion_count;
         times = timer.conversion_times;
@@ -122,11 +134,15 @@ int timer_end_measure(enum timer_type type)
     default: return -1;
     }
 
-    if (timer.frame_count >= TIMED_FRAMES)
+    if (*count >= TIMED_FRAMES)
         return 1;
 
     times[*count] = (omp_get_wtime() - times[*count]) * 1000.0;
     (*count)++;
+
+    if (*count >= TIMED_FRAMES)
+        printf("Timer cap reached.\n");
+
     return 0;
 }
 
@@ -149,7 +165,6 @@ int timer_quit()
         return -1;
 
     timer.stop_time = omp_get_wtime();
-
     timer.stopped = true;
     return 0;
 }
@@ -165,6 +180,13 @@ int timer_conclude()
         tot_frame_time += timer.frame_times[i];
     }
     double avg_frame_time = (float)tot_frame_time / (float)timer.frame_count;
+
+    double tot_manipulation_time = 0;
+    for (int i = 0; i < timer.manipulation_count; i++)
+    {
+        tot_manipulation_time += timer.manipulation_times[i];
+    }
+    double avg_manipulation_time = (float)tot_manipulation_time / (float)timer.manipulation_count;
 
 
     double tot_conversion_time = 0;
@@ -197,13 +219,16 @@ int timer_conclude()
     double avg_t_scan_time = (float)tot_t_scan_time / (float)timer.t_scan_count;
 
 
-    printf("Tracked %f ms over %d frames.\n", (float)((timer.stop_time - timer.start_time) * 1000.0), (int)timer.frame_count);
+    printf("Runtime Duration: %.0f ms\n", (float)((timer.stop_time - timer.start_time) * 1000.0));
+    printf("Frames Tracked: %d\n\n", (int)timer.frame_count);
     
-    printf("Avg frame length: %f ms\n\n", avg_frame_time);
+    printf("Avg. Frame: %.2f ms (%.2f fps)\n\n", avg_frame_time, (float)(1000.0 / avg_frame_time));
 
-    printf("Avg conversion length: \nst: %f ms\nmt: %f ms\n\n", avg_conversion_time, avg_t_conversion_time);
+    printf("Avg. Manipulation: %.2f ms\n\n", avg_manipulation_time);
 
-    printf("Avg scan length: \nst: %f ms\nmt: %f ms\n\n", avg_scan_time, avg_t_scan_time);
+    printf("Avg. Conversion: \nst: %.3f ms\nmt: %.3f ms\n\n", avg_conversion_time, avg_t_conversion_time);
+
+    printf("Avg. Scan: \nst: %.3f ms\nmt: %.3f ms\n\n", avg_scan_time, avg_t_scan_time);
 
     return 0;
 }

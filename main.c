@@ -38,8 +38,8 @@
 
 
 
-#define IMG_WIDTH 1280 // 320 640 800 1280
-#define IMG_HEIGHT 720 // 240 480 600 720
+#define IMG_WIDTH 800 // 320 640 800 1280
+#define IMG_HEIGHT 600 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 
@@ -80,7 +80,7 @@ int process_image(const Img_Format *format, Color *rgb)
     result = mjpeg_to_rgb(mjpeg, mjpeg_size, format, rgb);
     if (result == -1)
         return -1;
-
+    
     result = apply_img_effects(format, rgb);
     if (result == -1)
         return -1;
@@ -199,7 +199,8 @@ int start_snatching()
             return -1;
         }
 
-        // Begin image manipulation.        
+        // Begin image manipulation.
+        timer_begin_measure(MANIPULATION);
         Color rgb[IMG_SIZE];
         if (process_image(&format, rgb) == -1) 
             return -1;
@@ -240,6 +241,7 @@ int start_snatching()
             *window_rgb = rgb[i];
         }
         
+        timer_end_measure(MANIPULATION);
         // End image manipulation.
 
         if (close_frame() == -1) return -1;
@@ -260,8 +262,7 @@ int start_snatching()
 
         if (timer_end_measure(FRAME) == 1)
         {
-            printf("cap reached.\n");
-            escape = true;
+            //escape = true;
         }
     }
     timer_quit();

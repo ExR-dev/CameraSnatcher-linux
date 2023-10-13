@@ -4,10 +4,11 @@
 enum timer_type 
 {
 	FRAME = 1,
-	CONVERSION = 2,
-    T_CONVERSION = 3,
-	SCAN = 4,
-    T_SCAN = 5
+	MANIPULATION = 2,
+	CONVERSION = 3,
+    T_CONVERSION = 4,
+	SCAN = 5,
+    T_SCAN = 6
 };
 
 

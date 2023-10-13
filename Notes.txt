@@ -58,7 +58,7 @@ modular code.
 
 Threads:
 
-Deadlocks: multiple threads access same meory same time.
+Deadlocks: multiple threads access same memory same time.
 Livelock: two threads think a deadlock will happen and wait for each other.
 Race conditions: two threads try to change the same data.
 Data races:  one thread reads memory that another thread is writing.

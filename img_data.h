@@ -4,8 +4,9 @@
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 
-#define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
 #define LERP(a, b, t) (a * (1.0 - t) + (b * t))
+#define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
+#define CLERP(a, b, t) (a * (1.0 - CLAMP(t, 0.0, 1.0)) + (b * CLAMP(t, 0.0, 1.0)))
 
 #define VEC3_SQR_MAG(u, v) (u[])
 
@@ -29,8 +30,8 @@ typedef struct Color
 typedef struct HSV
 {
     float H; // Hue (0-360)
-    float S; // Saturation (0-100)
-    float V; // Value (0-100)
+    float S; // Saturation (0-1)
+    float V; // Value (0-1)
 } HSV;
 
 
