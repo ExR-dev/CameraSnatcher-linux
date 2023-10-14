@@ -1,12 +1,12 @@
 
 #define USE_THREADS
 
-#include "img_data.h"
+#include "include/img_data.h"
 
 #include <math.h>
 
 
-HSV rgb_to_hsv(Color rgb) 
+HSV rgb_to_hsv(RGB rgb) 
 {
     float 
         r = rgb.R / 255.0f, 
@@ -31,7 +31,7 @@ HSV rgb_to_hsv(Color rgb)
     return (HSV){h, s, v};
 }
 
-Color hsv_to_rgb(HSV hsv)
+RGB hsv_to_rgb(HSV hsv)
 {
     float r = 0.0f, g = 0.0f, b = 0.0f;
 
@@ -99,7 +99,7 @@ Color hsv_to_rgb(HSV hsv)
 
 	}
 
-	Color rgb = {
+	RGB rgb = {
         .R = r * 255,
         .G = g * 255,
         .B = b * 255
@@ -108,14 +108,14 @@ Color hsv_to_rgb(HSV hsv)
 	return rgb;
 }
 
-float color_magnitude_sqr(Color col1, Color col2)
+float color_magnitude_sqr(RGB col1, RGB col2)
 {
 	return (col2.R - col1.R) * (col2.R - col1.R) 
 		 + (col2.G - col1.G) * (col2.G - col1.G) 
 		 + (col2.B - col1.B) * (col2.B - col1.B);
 }
 
-float color_distance(Color col1, Color col2)
+float color_distance(RGB col1, RGB col2)
 {
 
     float r_dist = fabsf(col1.R - col2.R);
@@ -123,4 +123,13 @@ float color_distance(Color col1, Color col2)
     float b_dist = fabsf(col1.B - col2.B);
 
     return (r_dist + g_dist + b_dist);
+}
+
+RGB color_lerp(RGB col1, RGB col2, float t)
+{
+	return (RGB){
+		.R = (unsigned char)LERP((float)col1.R, (float)col2.R, t),
+		.G = (unsigned char)LERP((float)col1.G, (float)col2.G, t),
+		.B = (unsigned char)LERP((float)col1.B, (float)col2.B, t)
+	};
 }

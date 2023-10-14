@@ -1,14 +1,14 @@
 
 //#define COMPARE_PERFORMANCE
 
-#include "img_processing.h"
+#include "include/img_processing.h"
 
-#include "timer.h"
-#include "img_data.h"
-#include "jpegutils.h"
+#include "include/timer.h"
+#include "include/img_data.h"
+#include "include/jpegutils.h"
+#include "include/aabb.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
@@ -17,7 +17,7 @@
 #include <SDL2/SDL.h>
 
 
-void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned char v, Color *rgb)
+void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned char v, RGB *rgb)
 {
     int c = y1 - 16;
     int d = u - 128;
@@ -33,31 +33,31 @@ void _yuyv_to_rgb(unsigned char y1, unsigned char u, unsigned char y2, unsigned 
     }
 }
 
-int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format *format, Color *rgb)
+int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Fmt *fmt, RGB *rgb)
 {
     unsigned char 
-        col_y[format->size],
-        col_u[format->size],
-        col_v[format->size];
+        col_y[fmt->size],
+        col_u[fmt->size],
+        col_v[fmt->size];
 
     int result = decode_jpeg_raw(
         mjpeg, mjpeg_size, 
         0, Y4M_CHROMA_422, 
-        format->width, format->height, 
+        fmt->width, fmt->height, 
         col_y, col_u, col_v);
 
     if (result != 0)
         printf("Error in decode_jpeg_raw: %d\n",result);
 
-    int yuv_size = format->width * format->height / 2;
+    int yuv_size = fmt->width * fmt->height / 2;
 
 #ifdef COMPARE_PERFORMANCE
     unsigned char 
-        col_y_cpy[format->size],
-        col_u_cpy[format->size],
-        col_v_cpy[format->size];
+        col_y_cpy[fmt->size],
+        col_u_cpy[fmt->size],
+        col_v_cpy[fmt->size];
 
-    for (int i = 0; i < format->size; i++)
+    for (int i = 0; i < fmt->size; i++)
     {
         col_y_cpy[i] = col_y[i];
         col_u_cpy[i] = col_u[i];
@@ -111,152 +111,89 @@ int mjpeg_to_rgb(unsigned char *mjpeg, unsigned int mjpeg_size, const Img_Format
 }
 
 
-int _compare_match_strength_hsv(const Img_Format *format, const HSV *hsv, 
-    float scan_radius, int i, float *res_str, int *res_i)
+int _compare_match_strength(const Img_Fmt *fmt, const HSV *hsv, 
+    int i, float *res_str, int *res_i, HSV *out_hsv)
 {
-    int to_skip = 0;
+    if ((hsv[i].H > 180.0f - fmt->filter_hue * 180.0f && hsv[i].H < 180.0f + fmt->filter_hue * 180.0f) ||
+        hsv[i].S > 1.0f - fmt->filter_sat || hsv[i].V < fmt->filter_val)
+        return 0;
 
-    if ((hsv[i].H <= 5.0f || hsv[i].H >= 355.0f) && hsv[i].S <= 0.01f && hsv[i].V >= 0.99f)
+    int to_skip = (int)(fmt->skip_len);
+
+    int 
+        i_x = i % fmt->width, 
+        i_y = i / fmt->width;
+
+    float curr_str = 0.0f;
+    float hsv_div = 0.0f;
+
+    for (int o_y = MAX(i_y - (int)(fmt->scan_rad), 0); 
+        o_y < MIN(i_y + (int)(fmt->scan_rad), fmt->height); 
+        o_y++)
     {
-        to_skip = 1;
-
-        int 
-            i_x = i % format->width, 
-            i_y = i / format->width;
-
-        float curr_str = 0.0f;
-
-        for (int o_y = MAX(i_y - (int)scan_radius, 0); 
-            o_y < MIN(i_y + (int)scan_radius, format->height); 
-            o_y++)
+        for (int o_x = MAX(i_x - (int)(fmt->scan_rad), 0); 
+            o_x < MIN(i_x + (int)(fmt->scan_rad), fmt->width); 
+            o_x++)
         {
-            for (int o_x = MAX(i_x - (int)scan_radius, 0); 
-                o_x < MIN(i_x + (int)scan_radius, format->width); 
-                o_x++)
+            // Decrease the amount of samples taken per pixel for performance reasons.
+            if ((o_x - i_x) % MAX(1, (int)(fmt->sample_step)) != 0 || 
+                (o_y - i_y) % MAX(1, (int)(fmt->sample_step)) != 0)
+                continue;
+
+            float center_dist_sqr = (float)(
+                (o_x - i_x) * (o_x - i_x) + 
+                (o_y - i_y) * (o_y - i_y));
+            if (center_dist_sqr > fmt->scan_rad * fmt->scan_rad)
+                continue;
+            float center_dist = sqrtf(center_dist_sqr);
+
+
+            int i_offset = o_x + o_y * fmt->width;
+
+            float 
+                tapered_dist = center_dist / (center_dist + fmt->scan_rad / 8.0f),
+                desired_s = powf(CLERP(0.0f, MAX(0.0f, LERP(-2.5f, 1.0f, tapered_dist)) * 0.85f, powf(tapered_dist, 0.1f)), 1.5f),
+                desired_v = LERP(1.0f, 0.9f, tapered_dist);
+
+            float
+                old_curr_h_offset = 1.0f - CLAMP(fabsf((fmodf(hsv[i_offset].H + 180.0f, 360.0f) - 180.0f) / 120.0f) + CLERP(0.5f, 0.0f, hsv[i_offset].S * 2.0f), 0.0f, 1.0f),
+                curr_h_offset = LERP(((CLAMP(fabsf(hsv[i_offset].H - 180.0f), 0.0f, 360.0f)) * ((hsv[i_offset].V + 1.0f) / 2.0f)) / 180.0f, old_curr_h_offset, fmt->old_h),
+                curr_s_offset = fabsf((1.0f - desired_s) - hsv[i_offset].S),
+                curr_v_offset = CLERP(1.0f, 0.0f, (desired_v - hsv[i_offset].V) / desired_v);
+            
+            curr_h_offset = CLAMP(curr_h_offset * fmt->h_str, 0.0f, 1.0f);
+            curr_s_offset = CLAMP(curr_s_offset * fmt->s_str, 0.0f, 1.0f);
+            curr_v_offset = CLAMP(curr_v_offset * fmt->v_str, 0.0f, 1.0f);
+
+            curr_str += curr_h_offset * curr_s_offset * curr_v_offset;
+
+            if (out_hsv != NULL)
             {
-                // Decrease the amount of samples taken per pixel for performance reasons.
-                if ((o_x - i_x) % 3 != 0 || 
-                    (o_y - i_y) % 3 != 0)
-                    continue;
-
-                float center_dist_sqr = (float)(
-                    (o_x - i_x) * (o_x - i_x) + 
-                    (o_y - i_y) * (o_y - i_y));
-                if (center_dist_sqr > scan_radius * scan_radius)
-                    continue;
-                float center_dist = sqrtf(center_dist_sqr);
-
-
-                int i_offset = o_x + o_y * format->width;
-
-                float 
-                    tapered_dist = center_dist / (center_dist + scan_radius / 8.0f),
-                    desired_s = powf(CLERP(0.0f, MAX(0.0f, LERP(-2.5f, 1.0f, tapered_dist)) * 0.85f, powf(tapered_dist, 0.1f)), 1.5f),
-                    desired_v = LERP(1.0f, 0.9f, tapered_dist);
-
-                float 
-                    curr_h_offset =  1.0f - CLAMP(fabsf((fmodf(hsv[i_offset].H + 180.0f, 360.0f) - 180.0f) / 120.0f) + CLERP(0.5f, 0.0f, hsv[i_offset].S * 2.0f), 0.0f, 1.0f),
-                    curr_s_offset = fabsf((1.0f - desired_s) - hsv[i_offset].S),
-                    curr_v_offset = CLERP(1.0f, 0.0f, (desired_v - hsv[i_offset].V) / desired_v);
-                
-                curr_str += curr_h_offset * curr_s_offset * curr_v_offset;
+                out_hsv->H += curr_h_offset;
+                out_hsv->S += curr_s_offset;
+                out_hsv->V += curr_v_offset;
+                hsv_div++;
             }
-        }
-        
-        if (curr_str > *res_str)
-        {
-            *res_str = curr_str;
-            *res_i = i;
         }
     }
 
+    if (out_hsv != NULL)
+    {
+        out_hsv->H /= MAX(1.0f, hsv_div);
+        out_hsv->S /= MAX(1.0f, hsv_div);
+        out_hsv->V /= MAX(1.0f, hsv_div);
+    }
+    
+    if (curr_str > *res_str)
+    {
+        *res_str = curr_str;
+        *res_i = i;
+    }
     return to_skip;
 }
 
-int _draw_hsv(const Img_Format *format, Color *rgb, const HSV *hsv, int m_x, int m_y)
+int _scan_for_dot(const Img_Fmt *fmt, const HSV *hsv, int *res_i, float *res_str)
 {
-    float scan_radius = format->height / 28;
-
-    const unsigned char thread_count = 4;
-    #pragma omp parallel num_threads(thread_count)
-    {
-        unsigned int 
-            t_id = omp_get_thread_num(), 
-            start_i = format->size * t_id / thread_count, 
-            end_i = format->size * (t_id + 1) / thread_count;
-
-        for (int i = start_i; i < end_i; i++)
-        {
-            int 
-                i_x = i % format->width, 
-                i_y = i / format->width;
-
-            if (i_x == m_x && i_y == m_y)
-            {
-                float tot_str = 0.0f;
-
-                int 
-                    i_x = i % format->width, 
-                    i_y = i / format->width;
-
-                for (int o_y = MAX(i_y - (int)scan_radius, 0); 
-                    o_y < MIN(i_y + (int)scan_radius, format->height); 
-                    o_y++)
-                {
-                    for (int o_x = MAX(i_x - (int)scan_radius, 0); 
-                        o_x < MIN(i_x + (int)scan_radius, format->width); 
-                        o_x++)
-                    {
-                        // Decrease the amount of samples taken per pixel for performance reasons.
-                        if ((o_x - i_x) % 3 == 0 || 
-                            (o_y - i_y) % 3 == 0)
-                            continue;
-
-                        float center_dist_sqr = (float)(
-                            (o_x - i_x) * (o_x - i_x) + 
-                            (o_y - i_y) * (o_y - i_y));
-                        if (center_dist_sqr > scan_radius * scan_radius)
-                            continue;
-                        float center_dist = sqrtf(center_dist_sqr);
-
-                        int i_offset = o_x + o_y * format->width;
-
-                        float 
-                            tapered_dist = center_dist / (center_dist + scan_radius / 8.0f),
-                            desired_s = powf(CLERP(0.0f, MAX(0.0f, LERP(-2.5f, 1.0f, tapered_dist)) * 0.85f, powf(tapered_dist, 0.1f)), 1.5f),
-                            desired_v = LERP(1.0f, 0.9f, tapered_dist);
-
-                        float 
-                            curr_h_offset =  1.0f - CLAMP(fabsf((fmodf(hsv[i_offset].H + 180.0f, 360.0f) - 180.0f) / 120.0f) + CLERP(0.5f, 0.0f, hsv[i_offset].S * 2.0f), 0.0f, 1.0f),
-                            curr_s_offset = fabsf((1.0f - desired_s) - hsv[i_offset].S),
-                            curr_v_offset = CLERP(1.0f, 0.0f, (desired_v - hsv[i_offset].V) / desired_v);
-
-                        float curr_str = 1.0f / (1.0f + curr_h_offset + curr_s_offset + curr_v_offset);
-                        //float curr_str = curr_h_offset*curr_h_offset * curr_s_offset*curr_s_offset * curr_v_offset*curr_v_offset;
-                        tot_str += curr_h_offset * curr_s_offset * curr_v_offset;
-                        //tot_str += curr_str;
-                        
-                        rgb[i_offset] = (Color){
-                            .R = MAX(0.0f, MIN(curr_h_offset, 1.0f)) * 255.0f, 
-                            .G = MAX(0.0f, MIN(curr_s_offset, 1.0f)) * 255.0f, 
-                            .B = MAX(0.0f, MIN(curr_v_offset, 1.0f)) * 255.0f
-                        };
-                    }
-                }
-
-                printf("(%.2f, %.2f, %.2f)\n", hsv[i].H, hsv[i].S, hsv[i].V);
-                printf("str: %f\n\n", tot_str);
-            }
-        }
-    }
-    return 0;
-}
-
-
-int _scan_for_dot_hsv(const Img_Format *format, const HSV *hsv, int *res_i, float *res_str)
-{    
-    float scan_radius = format->height / 25;
-
 #ifdef COMPARE_PERFORMANCE
     // Single-threaded:
     {
@@ -264,11 +201,12 @@ int _scan_for_dot_hsv(const Img_Format *format, const HSV *hsv, int *res_i, floa
         *res_str = -1.0, 
         *res_i = -1;
 
-        for (int i = 0; i < format->size; i++)
+        for (int i = 0; i < fmt->size; i++)
         {
-            i += _compare_match_strength_hsv(
-                format, hsv, scan_radius, 
-                i, res_str, res_i
+            HSV out_hsv = (HSV){.H=0.0f, .S=0.0f, .V=0.0f};
+            i += _compare_match_strength(
+                fmt, hsv, scan_radius, 
+                i, res_str, res_i, &out_hsv
             );
         }
         timer_end_measure(SCAN);
@@ -291,17 +229,17 @@ int _scan_for_dot_hsv(const Img_Format *format, const HSV *hsv, int *res_i, floa
         {
             unsigned int 
                 t_id = omp_get_thread_num(), 
-                start_i = format->size * t_id / thread_count, 
-                end_i = format->size * (t_id + 1) / thread_count;
+                start_i = fmt->size * t_id / thread_count, 
+                end_i = fmt->size * (t_id + 1) / thread_count;
 
             best_str[t_id] = -1.0f,
             best_i[t_id] = -1;
-
+            
             for (int i = start_i; i < end_i; i++)
             {
-                i += _compare_match_strength_hsv(
-                    format, hsv, scan_radius, 
-                    i, &(best_str[t_id]), &(best_i[t_id])
+                HSV out_hsv = (HSV){.H=0.0f, .S=0.0f, .V=0.0f};
+                i += _compare_match_strength(fmt, hsv, i, 
+                    &(best_str[t_id]), &(best_i[t_id]), &out_hsv
                 );
             }
         }
@@ -321,41 +259,52 @@ int _scan_for_dot_hsv(const Img_Format *format, const HSV *hsv, int *res_i, floa
     return 0;
 }
 
-void _visualize_pixel_strengths_hsv(const Img_Format *format, Color *rgb, HSV *hsv)
-{
-    float scan_radius = format->height / 25;
 
+void _visualize_pixel_strengths(const Img_Fmt *fmt, RGB *rgb, HSV *hsv)
+{
     const unsigned char thread_count = 4;
 
     #pragma omp parallel num_threads(thread_count)
     {
         unsigned int 
             t_id = omp_get_thread_num(), 
-            start_i = format->size * t_id / thread_count, 
-            end_i = format->size * (t_id + 1) / thread_count;
+            start_i = fmt->size * t_id / thread_count, 
+            end_i = fmt->size * (t_id + 1) / thread_count;
 
         for (int i = start_i; i < end_i; i++)
         {
             float str = 0.0f;
             int index = -1;
 
-            int skip = _compare_match_strength_hsv(
-                format, hsv, scan_radius, 
-                i, &str, &index
+            HSV out_hsv = (HSV){.H=0.0f, .S=0.0f, .V=0.0f};
+            int skip = _compare_match_strength(
+                fmt, hsv, i, &str, &index, &out_hsv
             );
 
-            rgb[i] = (Color){
-                .R = (unsigned char)(str / (str + 10.0f)), 
-                .G = (unsigned char)(str / (str + 10.0f)), 
-                .B = (unsigned char)(str / (str + 10.0f)) 
-            };
+            if (fmt->greyscale == 0.0f)
+            {
+                rgb[i] = (RGB){
+                    .R = (unsigned char)(str / (str + 10.0f) * 255.0f), 
+                    .G = (unsigned char)(str / (str + 10.0f) * 255.0f), 
+                    .B = (unsigned char)(str / (str + 10.0f) * 255.0f) 
+                };
+            }
+            else
+            {
+                rgb[i] = (RGB){
+                    .R = (unsigned char)(out_hsv.H * 255.0f), 
+                    .G = (unsigned char)(out_hsv.S * 255.0f), 
+                    .B = (unsigned char)(out_hsv.V * 255.0f) 
+                };
+            }
+
             i += skip;
         }
     }
 }
 
 
-int draw_circle(const Img_Format *format, Color *rgb, int x, int y, int r, int w)
+int draw_circle(const Img_Fmt *fmt, RGB *rgb, Vec2 pos, int r, int w, RGB col)
 {
     for (float angle = 0.0f; angle < PI / 2.0f; angle += 1.0f / ((float)(r + w) * PI))
     {
@@ -369,19 +318,16 @@ int draw_circle(const Img_Format *format, Color *rgb, int x, int y, int r, int w
             {
                 for (int j = 0; j < w; j++)
                 {
-                    int x_offset = x + x_flip * (int)(ang_cos * (float)(r + j));
-                    int y_offset = y + y_flip * (int)(ang_sin * (float)(r + j));
+                    int x_offset = pos.x + x_flip * (int)(ang_cos * (float)(r + j));
+                    int y_offset = pos.y + y_flip * (int)(ang_sin * (float)(r + j));
 
-                    if (x_offset < 0 || x_offset >= format->width)
+                    if (x_offset < 0 || x_offset >= fmt->width)
                         break;
-                    if (y_offset < 0 || y_offset >= format->height)
+                    if (y_offset < 0 || y_offset >= fmt->height)
                         break;
 
-                    int i = x_offset + y_offset * format->width;
-
-                    rgb[i].R = 0;
-                    rgb[i].G = 255;
-                    rgb[i].B = 0;
+                    int i = x_offset + y_offset * fmt->width;
+                    rgb[i] = col;
                 }
             }
         }
@@ -390,58 +336,90 @@ int draw_circle(const Img_Format *format, Color *rgb, int x, int y, int r, int w
     return 0;
 }
 
-int apply_img_effects(const Img_Format *format, Color *rgb)
+int draw_box(const Img_Fmt *fmt, RGB *rgb, AABB box, int w, RGB col)
 {
-    HSV hsv[format->size];
-    for (int i = 0; i < format->size; i++)
+    // Ensure that the line-width does not exceed the size of the aabb.
+    w = CLAMP(w, 1, MIN((box.e - box.w) / 2, (box.s - box.n) / 2));
+
+    #pragma omp parallel num_threads(4)
+    {
+        unsigned int t_id = omp_get_thread_num();
+        Vec2 top_left, bot_right;
+
+        switch (t_id)
+        {
+        case 0: // Fill in northern edge.
+            top_left =  (Vec2){ .x = box.w,      .y = box.n     };
+            bot_right = (Vec2){ .x = box.e,      .y = box.n + w };
+            break;
+        case 1: // Fill in southern edge.
+            top_left =  (Vec2){ .x = box.w,      .y = box.s - w };
+            bot_right = (Vec2){ .x = box.e,      .y = box.s     };
+            break;
+        case 2: // Fill in western edge.
+            top_left =  (Vec2){ .x = box.w,      .y = box.n + w };
+            bot_right = (Vec2){ .x = box.w + w,  .y = box.s - w };
+            break;
+        case 3: // Fill in eastern edge.
+            top_left =  (Vec2){ .x = box.e - w,  .y = box.n + w };
+            bot_right = (Vec2){ .x = box.e,      .y = box.s - w };
+            break;
+        }
+
+        for (int y = top_left.y; y < bot_right.y; y++)
+        {
+            if (y >= fmt->height)
+                break;
+
+            for (int x = top_left.x; x < bot_right.x; x++)
+            {
+                if (x >= fmt->width)
+                    break;
+
+                int i = x + y * fmt->width;
+                rgb[i] = col;
+            }
+        }
+    }
+    
+    return 0;
+}
+
+
+int find_laser_dot(const Img_Fmt *fmt, const RGB *rgb, Vec2 *pos, float *confidence)
+{
+    HSV hsv[fmt->size];
+    for (int i = 0; i < fmt->size; i++)
     {
         hsv[i] = rgb_to_hsv(rgb[i]);
     }
-    
-    /*int x, y;
-    SDL_GetMouseState(&x, &y);
-    _draw_hsv(format, rgb, hsv, x, y);*/
-
-    //_visualize_pixel_strengths_hsv(format, rgb, hsv);
-
-    int result = 0;
 
     float r_str;
     int r_i;
-    result = _scan_for_dot_hsv(format, hsv, &r_i, &r_str);
+    _scan_for_dot(fmt, hsv, &r_i, &r_str);
 
-    if (r_i != -1 && r_str > 8.0f)
+    if (r_i == -1)
     {
-        printf("%f\n", r_str);
-        int 
-            x = r_i % format->width, 
-            y = r_i / format->width;
-
-        for (int o_y = MAX(y - 1, 0); o_y < MIN(y + 1, format->height); o_y++)
-        {
-            for (int o_x = MAX(x - 1, 0); o_x < MIN(x + 1, format->width); o_x++)
-            {
-                int i_offset = o_x + o_y * format->width;
-
-                rgb[i_offset] = (Color){0, 0, 0};
-            }
-        }
-        
-        result = draw_circle(format, rgb, x, y, 30, (int)(r_str / 10.0f) + 1);
-        if (result  != 0)
-            return -1;
+        *pos = (Vec2){0,0};
+        *confidence = -1;
+        return -1;
     }
 
-    /*int 
-        x = format->width / 2, 
-        y = format->height / 2,
-        i = x + y * format->width;
+    *pos = (Vec2){r_i % fmt->width, r_i / fmt->width};
+    *confidence = r_str;
+    return 0;
+}
 
-    draw_circle(format, rgb, x, y, 10, 1);
-    printf("\n(%d, %d, %d)\n\n", rgb[i].R, rgb[i].G, rgb[i].B);
-    printf("Dist white: %f\n", sqrt(color_magnitude_sqr(rgb[i], (Color){.R = 255, .G = 255, .B = 255})));
-    printf("Dist black: %f\n", sqrt(color_magnitude_sqr(rgb[i], (Color){.R = 0, .G = 0, .B = 0})));
-    printf("Dist red: %f\n", sqrt(color_magnitude_sqr(rgb[i], (Color){.R = 255, .G = 0, .B = 0})));*/
+
+int apply_img_effects(const Img_Fmt *fmt, RGB *rgb)
+{
+    HSV hsv[fmt->size];
+    for (int i = 0; i < fmt->size; i++)
+    {
+        hsv[i] = rgb_to_hsv(rgb[i]);
+    }
+
+    _visualize_pixel_strengths(fmt, rgb, hsv);
 
     return 0;
 }

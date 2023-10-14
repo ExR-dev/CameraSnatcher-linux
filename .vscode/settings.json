@@ -71,7 +71,8 @@
     "jpegutils.h": "c",
     "pthread.h": "c",
     "img_processing.h": "c",
-    "omp.h": "c"
+    "omp.h": "c",
+    "aabb.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }

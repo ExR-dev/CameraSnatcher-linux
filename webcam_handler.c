@@ -1,25 +1,17 @@
 
 #define USE_THREADS
 
-#include "webcam_handler.h"
-#include "img_data.h"
+#include "include/webcam_handler.h"
+#include "include/img_data.h"
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
 #include <string.h>
-#include <math.h>
 
-#include <unistd.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
 #include <sys/mman.h>
 
 #include <linux/videodev2.h>
-#include <omp.h>
-#include <pthread.h>
 
 
 typedef struct Capture_Data
@@ -44,7 +36,7 @@ static V4L2_Container v4l2_container;
 
 
 /// @brief Tells the camera device what video format to use.
-int _set_supported_video_format(const Img_Format *format)
+int _set_supported_video_format(const Img_Fmt *format)
 {
     // Overwrite memory in format with 0.
     memset(&v4l2_container.format, 0, sizeof(v4l2_container.format));
@@ -170,7 +162,7 @@ int _requeue_buffer()
 }
 
 
-int webcam_init(const Img_Format *format)
+int webcam_init(const Img_Fmt *format)
 {
     capture_data.handle = open("/dev/video0", O_RDWR, 0);
 

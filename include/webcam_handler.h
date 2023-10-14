@@ -4,7 +4,7 @@
 #include "img_data.h"
 
 
-int webcam_init(const Img_Format *format);
+int webcam_init(const Img_Fmt *format);
 
 int next_frame();
 int get_frame(unsigned char **mjpeg, unsigned int *mjpeg_size);

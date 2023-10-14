@@ -1,10 +1,10 @@
-// gcc -Wall -g main.c jpegutils.c timer.c img_data.c webcam_handler.c img_processing.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // valgrind --leak-check=full --track-origins=yes -s ./release
 
-// gcc -Wall -g main.c jpegutils.c timer.c img_data.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
-// gcc main.c jpegutils.c timer.c img_data.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
 
@@ -12,63 +12,38 @@
 
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-#include "timer.h"
-#include "img_data.h"
-#include "webcam_handler.h"
-#include "img_processing.h"
+#include "include/stb_image_write.h"
+#include "include/timer.h"
+#include "include/img_data.h"
+#include "include/webcam_handler.h"
+#include "include/img_processing.h"
+#include "include/aabb.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-//#include <math.h>
 
-//#include <unistd.h>
-//#include <fcntl.h>
-//#include <errno.h>
-//#include <sys/ioctl.h>
-//#include <sys/stat.h>
-//#include <sys/mman.h>
-
-//#include <linux/videodev2.h>
 #include <SDL2/SDL.h>
 #include <omp.h>
 #include <pthread.h>
 
 
+#define var_name(var) #var
 
-#define IMG_WIDTH 800 // 320 640 800 1280
-#define IMG_HEIGHT 600 // 240 480 600 720
+#define IMG_WIDTH 320 // 320 640 800 1280
+#define IMG_HEIGHT 240 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 
 typedef struct Save_Img_Thread_Data
 {
     unsigned int frame_num;
-    Color *rgb_copy;
+    RGB *rgb_copy;
 } Save_Img_Thread_Data;
 
 
-typedef struct AABB
-{
-    unsigned short n; // The y-value of the boxes northern edge.
-    unsigned short e; // The x-value of the boxes eastern edge.
-    unsigned short s; // The y-value of the boxes southern edge.
-    unsigned short w; // The x-value of the boxes western edge.
-} AABB;
-
-bool AABB_intersect(AABB box1, AABB box2)
-{
-    if (box1.e < box2.w) return false;
-    if (box1.w > box2.e) return false;
-    if (box1.s < box2.n) return false;
-    if (box1.n > box2.s) return false;
-    return true;
-}
-
-
-int process_image(const Img_Format *format, Color *rgb)
+int process_image(const Img_Fmt *fmt, RGB *rgb)
 {
     unsigned char *mjpeg = NULL;
     unsigned int mjpeg_size;
@@ -77,18 +52,60 @@ int process_image(const Img_Format *format, Color *rgb)
     if (result == -1)
         return -1;
 
-    result = mjpeg_to_rgb(mjpeg, mjpeg_size, format, rgb);
-    if (result == -1)
-        return -1;
-    
-    result = apply_img_effects(format, rgb);
+    result = mjpeg_to_rgb(mjpeg, mjpeg_size, fmt, rgb);
     if (result == -1)
         return -1;
 
+    if (fmt->visualize == 0.0f)
+    {
+        Vec2 dot_pos;
+        float confidence = 0.0f;
+        result = find_laser_dot(fmt, rgb, &dot_pos, &confidence);
+        confidence -= fmt->dot_threshold;
+
+        if (confidence > 0)
+            draw_circle(fmt, rgb, dot_pos, 10, CLAMP((int)(log2f(confidence + 1.0f)), 1, 10), (RGB){0,0,255});
+
+        AABB 
+            left_select = (AABB){0, 0, fmt->width/5, fmt->height},
+            right_select = (AABB){fmt->width*4/5, 0, fmt->width, fmt->height},
+            fwd_select = (AABB){fmt->width/5, 0, fmt->width*4/5, fmt->height/3},
+            back_select = (AABB){fmt->width/5, fmt->height*2/3, fmt->width*4/5, fmt->height};
+
+        bool 
+            go_left = point_intersect(dot_pos, left_select) && confidence > 0, 
+            go_right = point_intersect(dot_pos, right_select) && confidence > 0, 
+            go_fwd = point_intersect(dot_pos, fwd_select) && confidence > 0, 
+            go_back = point_intersect(dot_pos, back_select) && confidence > 0;
+
+        draw_box(fmt, rgb, left_select, 2, go_left ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, right_select, 2, go_right ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, fwd_select, 2, go_fwd ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, back_select, 2, go_back ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+
+        if (go_left)
+            printf("Turning left...");
+        else if (go_right)
+            printf("Turning right...");
+        else if (go_fwd)
+            printf("Going forward...");
+        else if (go_back)
+            printf("Going back...");
+        else
+            printf("Idling...");
+        printf("\n");
+    }
+    else
+    {
+        result = apply_img_effects(fmt, rgb);
+        if (result == -1)
+            return -1;
+    }
+    
     return 0;
 }
 
-int save_png(Color *rgb, char *name)
+int save_png(RGB *rgb, char *name)
 {
     char *file_name = malloc(strlen(name) + strlen(".png") + 1);
 
@@ -131,11 +148,134 @@ void *threaded_save_png(void *input)
 }
 
 
+typedef struct Key_Var_Pair
+{
+    char *name;
+    void *ptr;
+    int SDL_key;
+    float step;
+} Key_Var_Pair;
+
+int handle_keypresses(Img_Fmt *fmt, int key_count, const Uint8 *state, const Uint8 *last_state)
+{
+    if (state[SDL_SCANCODE_ESCAPE] == 1)
+    {
+        printf("Pressed escape.\n");
+        return -1;
+    }
+
+    bool shift = 1 <= state[SDL_SCANCODE_LSHIFT] + state[SDL_SCANCODE_RSHIFT];
+    bool   alt = 1 <= state[SDL_SCANCODE_LALT] + state[SDL_SCANCODE_RALT];
+    bool    up = 1 == state[SDL_SCANCODE_UP];
+    bool  down = 1 == state[SDL_SCANCODE_DOWN];
+    bool  mult = 1 == state[SDL_SCANCODE_M];
+
+    const Key_Var_Pair f_pairs[] = {
+        // Full image scan visualization.
+        { "visualize", &fmt->visualize, SDL_SCANCODE_Q, 1.0f },
+        // Visualize total strength as greyscale or individual hsv strengths as rgb.
+        { "greyscale", &fmt->greyscale, SDL_SCANCODE_W, 1.0f },
+        // Dot detection threshold.
+        { "dot_threshold", &fmt->dot_threshold, SDL_SCANCODE_E, 0.2f },
+
+        // Enables skipping pixels based on initial color-matching.
+        // Warning: lowering these can severely impact performance.
+        { "filter_hue", &fmt->filter_hue, SDL_SCANCODE_R, 0.05f },
+        { "filter_sat", &fmt->filter_sat, SDL_SCANCODE_T, 0.05f },
+        { "filter_val", &fmt->filter_val, SDL_SCANCODE_Y, 0.05f },
+
+        // Radius of surrounding pixel scan.
+        { "scan_rad", &fmt->scan_rad, SDL_SCANCODE_A, 0.2f },
+        // Skip length after detecting valid pixel.
+        { "skip_len", &fmt->skip_len, SDL_SCANCODE_S, 0.2f },
+        // The minimal distance between each pixel sampled within scan_rad.
+        { "sample_step", &fmt->sample_step, SDL_SCANCODE_D, 0.2f },
+
+        // Interpolates between a new and old method of weighing hue.
+        { "old_h", &fmt->old_h, SDL_SCANCODE_F, 0.1f },
+
+        // HSV detection weights.
+        { "h_str", &fmt->h_str, SDL_SCANCODE_Z, 0.1f },
+        { "s_str", &fmt->s_str, SDL_SCANCODE_X, 0.1f },
+        { "v_str", &fmt->v_str, SDL_SCANCODE_C, 0.1f }
+    };
+
+    for (int i = 0; i < sizeof(f_pairs) / sizeof(Key_Var_Pair); i++)
+    {
+        if (state[f_pairs[i].SDL_key] == 1)
+        {
+            float last_val = *(float*)f_pairs[i].ptr;
+
+            if (last_state[f_pairs[i].SDL_key] != 1)
+                printf("%s: %.2f\n", f_pairs[i].name, last_val);
+
+            if (mult)
+            {
+                if (up)         *(float*)f_pairs[i].ptr *= (shift ? 1.25f : (alt ? 1.01f : 1.05f));
+                else if (down)  *(float*)f_pairs[i].ptr *= (shift ? 0.8f : (alt ? 0.99f : 0.95f));
+            }
+            else
+            {
+                if (up)         *(float*)f_pairs[i].ptr += f_pairs[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
+                else if (down)  *(float*)f_pairs[i].ptr -= f_pairs[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
+            }
+
+            *(float*)f_pairs[i].ptr = MAX(0.0f, *(float*)f_pairs[i].ptr);
+            
+            if (*(float*)f_pairs[i].ptr != last_val)
+                printf("%s: %.2f\n", f_pairs[i].name, *(float*)f_pairs[i].ptr);
+        }
+    }
+    return 0;
+}
+
+
 int start_snatching()
 {
-    Img_Format format = (Img_Format){ IMG_WIDTH, IMG_HEIGHT, IMG_SIZE };
+    Img_Fmt fmt = (Img_Fmt){ 
+        .width = IMG_WIDTH,
+        .height = IMG_HEIGHT,
+        .size = IMG_SIZE,
 
-    if (webcam_init(&format) == -1) return -1;
+
+        .visualize = 1.0f,
+        .greyscale = 6.0f,
+        .dot_threshold = 0.0f,
+
+        .filter_hue = 0.99f,
+        .filter_sat = 0.99f,
+        .filter_val = 0.99f,
+
+        .scan_rad = 2.0f,
+        .skip_len = 0.0f,
+        .sample_step = 0.0f,
+
+        .old_h = 0.0f,
+
+        .h_str = 1.0f,
+        .s_str = 0.0f,
+        .v_str = 0.0f
+
+        /*
+        .visualize = 1.0f,
+        .greyscale = 0.0f,
+        .filter_white = 1.0f,
+
+        .dot_threshold = 8.0f,
+        .old_h = 0.0f,
+
+        .scan_rad = IMG_HEIGHT / 25.0f,
+        .skip_len = 1.0f,
+        .sample_step = 3.0f,
+        
+
+        .h_str = 1.0f,
+        .s_str = 1.0f,
+        .v_str = 1.0f
+        */
+    };
+
+    if (webcam_init(&fmt) == -1) return -1;
 
     printf("\nOpening Window...\n");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) 
@@ -183,11 +323,9 @@ int start_snatching()
             last_state[i] = state[i];
         SDL_PumpEvents();
 
-        if (state[SDL_SCANCODE_Q] == 1)
-        {
-            printf("Pressed Quit.\n");
+        if (handle_keypresses(&fmt, key_count, state, last_state) == -1)
             escape = true;
-        }
+
 
         if (next_frame() == -1) return -1;
 
@@ -201,8 +339,8 @@ int start_snatching()
 
         // Begin image manipulation.
         timer_begin_measure(MANIPULATION);
-        Color rgb[IMG_SIZE];
-        if (process_image(&format, rgb) == -1) 
+        RGB rgb[IMG_SIZE];
+        if (process_image(&fmt, rgb) == -1) 
             return -1;
 
         // Checks if space was pressed this frame
@@ -210,8 +348,7 @@ int start_snatching()
         {
             printf("Saving Frame %d...\n", img_num);
 
-        #ifdef USE_THREADS
-            Color *rgb_copy = malloc(IMG_SIZE * sizeof(Color));
+            RGB *rgb_copy = malloc(IMG_SIZE * sizeof(RGB));
             for (int i = 0; i < IMG_SIZE; i++)
                 rgb_copy[i] = rgb[i];
             
@@ -222,29 +359,18 @@ int start_snatching()
             // Failures are ignored.
             pthread_create(&frame_capture_handle, NULL, threaded_save_png, &t_data);
             pthread_detach(frame_capture_handle);
-        #else
-            int name_length = snprintf(NULL, 0, "Frame %d", img_num);
-            char *img_name = malloc(name_length + 1);
-            sprintf(img_name, "Frame %d", img_num++);
-
-            int save_result = save_png(rgb, img_name);
-            free(img_name);
-
-            if (save_result == -1)
-                return -1;
-        #endif
         }
         
         for (int i = 0; i < IMG_SIZE; i++)
         {
-            Color *window_rgb = &((Color*)window_pixels)[i];
+            RGB *window_rgb = &((RGB*)window_pixels)[i];
             *window_rgb = rgb[i];
         }
-        
-        timer_end_measure(MANIPULATION);
-        // End image manipulation.
+        timer_end_measure(MANIPULATION); // End image manipulation.
 
-        if (close_frame() == -1) return -1;
+
+        if (close_frame() == -1) 
+            return -1;
 
         SDL_UnlockTexture(g_stream_texture);
         if (SDL_RenderClear(g_renderer) < 0) 

@@ -35,7 +35,7 @@
 #include <jerror.h>
 #include <assert.h>
 
-#include "jpegutils.h"
+#include "include/jpegutils.h"
 
  /*
  * jpeg_data:       buffer with input / output jpeg

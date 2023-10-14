@@ -1,6 +1,10 @@
 #ifndef INCLUDE_IMG_DATA_H
 #define INCLUDE_IMG_DATA_H
 
+
+#include <stdbool.h>
+
+
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 
@@ -8,24 +12,28 @@
 #define CLAMP(x, a, b) (MAX(a, MIN(x, b)))
 #define CLERP(a, b, t) (a * (1.0 - CLAMP(t, 0.0, 1.0)) + (b * CLAMP(t, 0.0, 1.0)))
 
-#define VEC3_SQR_MAG(u, v) (u[])
-
 #define PI 3.14159265358979323846
 
 
-typedef struct Img_Format
+typedef struct Img_Fmt
 {
-    unsigned int width;
-    unsigned int height;
-    unsigned int size;
-} Img_Format;
+    const unsigned int width, height, size;
 
-typedef struct Color
+    float 
+        visualize, greyscale, dot_threshold,
+        filter_hue, filter_sat, filter_val,
+        scan_rad, skip_len, sample_step,
+        old_h,
+        h_str, s_str, v_str;
+
+} Img_Fmt;
+
+typedef struct RGB
 {
     unsigned char R;
     unsigned char G;
     unsigned char B;
-} Color;
+} RGB;
 
 typedef struct HSV
 {
@@ -35,12 +43,14 @@ typedef struct HSV
 } HSV;
 
 
-HSV rgb_to_hsv(Color rgb);
+HSV rgb_to_hsv(RGB rgb);
 
-Color hsv_to_rgb(HSV hsv);
+RGB hsv_to_rgb(HSV hsv);
 
-float color_magnitude_sqr(Color col1, Color col2);
+float color_magnitude_sqr(RGB col1, RGB col2);
 
-float color_distance(Color col1, Color col2);
+float color_distance(RGB col1, RGB col2);
+
+RGB color_lerp(RGB col1, RGB col2, float t);
 
 #endif
