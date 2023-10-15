@@ -156,24 +156,28 @@ int _compare_match_strength(const Img_Fmt *fmt, const HSV *hsv,
                 desired_v = LERP(1.0f, 0.9f, tapered_dist);
 
             float
-                old_curr_h_offset = 1.0f - CLAMP(fabsf((fmodf(hsv[i_offset].H + 180.0f, 360.0f) - 180.0f) / 120.0f) + CLERP(0.5f, 0.0f, hsv[i_offset].S * 2.0f), 0.0f, 1.0f),
-                curr_h_offset = LERP(((CLAMP(fabsf(hsv[i_offset].H - 180.0f), 0.0f, 360.0f)) * ((hsv[i_offset].V + 1.0f) / 2.0f)) / 180.0f, old_curr_h_offset, fmt->old_h),
-                curr_s_offset = fabsf((1.0f - desired_s) - hsv[i_offset].S),
-                curr_v_offset = CLERP(1.0f, 0.0f, (desired_v - hsv[i_offset].V) / desired_v);
+                alt_h_offset = (fmt->alt_weights == 0.0f) ? 0.0f : fabsf(hsv[i_offset].H - 180.0f) / 180.0f,
+                alt_s_offset = (fmt->alt_weights == 0.0f) ? 0.0f : CLERP(0.0f, MAX(0.0f, LERP(-2.0f, 1.5f, tapered_dist)) * 0.85f, powf(tapered_dist, 0.1f)),
+                alt_v_offset = (fmt->alt_weights == 0.0f) ? 0.0f : 0.0f;
+                
+            float
+                curr_h_offset = LERP(((CLAMP(fabsf(hsv[i_offset].H - 180.0f), 0.0f, 360.0f)) * ((hsv[i_offset].V + 1.0f) / 2.0f)) / 180.0f, alt_h_offset, fmt->alt_weights),
+                curr_s_offset = LERP(fabsf((1.0f - desired_s) - hsv[i_offset].S), alt_s_offset, fmt->alt_weights),
+                curr_v_offset = LERP(CLERP(1.0f, 0.0f, (desired_v - hsv[i_offset].V) / desired_v), alt_v_offset, fmt->alt_weights);
             
-            curr_h_offset = CLAMP(curr_h_offset * fmt->h_str, 0.0f, 1.0f);
-            curr_s_offset = CLAMP(curr_s_offset * fmt->s_str, 0.0f, 1.0f);
-            curr_v_offset = CLAMP(curr_v_offset * fmt->v_str, 0.0f, 1.0f);
-
-            curr_str += curr_h_offset * curr_s_offset * curr_v_offset;
-
             if (out_hsv != NULL)
             {
-                out_hsv->H += curr_h_offset;
-                out_hsv->S += curr_s_offset;
-                out_hsv->V += curr_v_offset;
+                out_hsv->H += LERP(0.0f, curr_h_offset, fmt->h_str);
+                out_hsv->S += LERP(0.0f, curr_s_offset, fmt->s_str);
+                out_hsv->V += LERP(0.0f, curr_v_offset, fmt->v_str);
                 hsv_div++;
             }
+
+            curr_h_offset = LERP(1.0f, curr_h_offset, fmt->h_str);
+            curr_s_offset = LERP(1.0f, curr_s_offset, fmt->s_str);
+            curr_v_offset = LERP(1.0f, curr_v_offset, fmt->v_str);
+
+            curr_str += curr_h_offset * curr_s_offset * curr_v_offset;
         }
     }
 
@@ -237,9 +241,8 @@ int _scan_for_dot(const Img_Fmt *fmt, const HSV *hsv, int *res_i, float *res_str
             
             for (int i = start_i; i < end_i; i++)
             {
-                HSV out_hsv = (HSV){.H=0.0f, .S=0.0f, .V=0.0f};
                 i += _compare_match_strength(fmt, hsv, i, 
-                    &(best_str[t_id]), &(best_i[t_id]), &out_hsv
+                    &(best_str[t_id]), &(best_i[t_id]), NULL
                 );
             }
         }
@@ -281,12 +284,13 @@ void _visualize_pixel_strengths(const Img_Fmt *fmt, RGB *rgb, HSV *hsv)
                 fmt, hsv, i, &str, &index, &out_hsv
             );
 
-            if (fmt->greyscale == 0.0f)
+            if (fmt->greyscale != 0.0f)
             {
+                unsigned char brightness = (unsigned char)CLAMP(str / (str + 10.0f) * 255.0f - fmt->dot_threshold, 0.0f, 255.0f);
                 rgb[i] = (RGB){
-                    .R = (unsigned char)(str / (str + 10.0f) * 255.0f), 
-                    .G = (unsigned char)(str / (str + 10.0f) * 255.0f), 
-                    .B = (unsigned char)(str / (str + 10.0f) * 255.0f) 
+                    .R = brightness, 
+                    .G = brightness, 
+                    .B = brightness 
                 };
             }
             else
@@ -301,6 +305,31 @@ void _visualize_pixel_strengths(const Img_Fmt *fmt, RGB *rgb, HSV *hsv)
             i += skip;
         }
     }
+}
+
+
+int find_laser_dot(const Img_Fmt *fmt, const RGB *rgb, Vec2 *pos, float *confidence)
+{
+    HSV hsv[fmt->size];
+    for (int i = 0; i < fmt->size; i++)
+    {
+        hsv[i] = rgb_to_hsv(rgb[i]);
+    }
+
+    float r_str;
+    int r_i;
+    _scan_for_dot(fmt, hsv, &r_i, &r_str);
+
+    if (r_i == -1)
+    {
+        *pos = (Vec2){0,0};
+        *confidence = -1;
+        return -1;
+    }
+
+    *pos = (Vec2){r_i % fmt->width, r_i / fmt->width};
+    *confidence = r_str;
+    return 0;
 }
 
 
@@ -382,31 +411,6 @@ int draw_box(const Img_Fmt *fmt, RGB *rgb, AABB box, int w, RGB col)
         }
     }
     
-    return 0;
-}
-
-
-int find_laser_dot(const Img_Fmt *fmt, const RGB *rgb, Vec2 *pos, float *confidence)
-{
-    HSV hsv[fmt->size];
-    for (int i = 0; i < fmt->size; i++)
-    {
-        hsv[i] = rgb_to_hsv(rgb[i]);
-    }
-
-    float r_str;
-    int r_i;
-    _scan_for_dot(fmt, hsv, &r_i, &r_str);
-
-    if (r_i == -1)
-    {
-        *pos = (Vec2){0,0};
-        *confidence = -1;
-        return -1;
-    }
-
-    *pos = (Vec2){r_i % fmt->width, r_i / fmt->width};
-    *confidence = r_str;
     return 0;
 }
 

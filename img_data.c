@@ -124,12 +124,3 @@ float color_distance(RGB col1, RGB col2)
 
     return (r_dist + g_dist + b_dist);
 }
-
-RGB color_lerp(RGB col1, RGB col2, float t)
-{
-	return (RGB){
-		.R = (unsigned char)LERP((float)col1.R, (float)col2.R, t),
-		.G = (unsigned char)LERP((float)col1.G, (float)col2.G, t),
-		.B = (unsigned char)LERP((float)col1.B, (float)col2.B, t)
-	};
-}

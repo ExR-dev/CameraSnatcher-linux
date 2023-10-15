@@ -20,10 +20,10 @@ typedef struct Img_Fmt
     const unsigned int width, height, size;
 
     float 
-        visualize, greyscale, dot_threshold,
+        visualize, greyscale, verbose,
         filter_hue, filter_sat, filter_val,
         scan_rad, skip_len, sample_step,
-        old_h,
+        dot_threshold, alt_weights,
         h_str, s_str, v_str;
 
 } Img_Fmt;
@@ -50,7 +50,5 @@ RGB hsv_to_rgb(HSV hsv);
 float color_magnitude_sqr(RGB col1, RGB col2);
 
 float color_distance(RGB col1, RGB col2);
-
-RGB color_lerp(RGB col1, RGB col2, float t);
 
 #endif

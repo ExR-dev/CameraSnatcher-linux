@@ -36,6 +36,23 @@
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
 
 
+typedef enum Increment_Type
+{
+    CONTINUOUS,
+    STEPWISE,
+    TOGGLE
+} Increment_Type;
+
+typedef struct Key_Mapping
+{
+    void *ptr;
+    char *name;
+    int SDL_key;
+    Increment_Type incr_type;
+    float step;
+} Key_Mapping;
+
+
 typedef struct Save_Img_Thread_Data
 {
     unsigned int frame_num;
@@ -56,7 +73,7 @@ int process_image(const Img_Fmt *fmt, RGB *rgb)
     if (result == -1)
         return -1;
 
-    if (fmt->visualize == 0.0f)
+    if (fmt->verbose == 1.0f)
     {
         Vec2 dot_pos;
         float confidence = 0.0f;
@@ -78,10 +95,10 @@ int process_image(const Img_Fmt *fmt, RGB *rgb)
             go_fwd = point_intersect(dot_pos, fwd_select) && confidence > 0, 
             go_back = point_intersect(dot_pos, back_select) && confidence > 0;
 
-        draw_box(fmt, rgb, left_select, 2, go_left ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
-        draw_box(fmt, rgb, right_select, 2, go_right ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
-        draw_box(fmt, rgb, fwd_select, 2, go_fwd ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
-        draw_box(fmt, rgb, back_select, 2, go_back ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, left_select, 1, go_left ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, right_select, 1, go_right ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, fwd_select, 1, go_fwd ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
+        draw_box(fmt, rgb, back_select, 1, go_back ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
 
         if (go_left)
             printf("Turning left...");
@@ -148,15 +165,7 @@ void *threaded_save_png(void *input)
 }
 
 
-typedef struct Key_Var_Pair
-{
-    char *name;
-    void *ptr;
-    int SDL_key;
-    float step;
-} Key_Var_Pair;
-
-int handle_keypresses(Img_Fmt *fmt, int key_count, const Uint8 *state, const Uint8 *last_state)
+int handle_keypresses(Img_Fmt *fmt, const Key_Mapping mappings[], int m_count, const Uint8 *state, const Uint8 *last_state)
 {
     if (state[SDL_SCANCODE_ESCAPE] == 1)
     {
@@ -164,66 +173,92 @@ int handle_keypresses(Img_Fmt *fmt, int key_count, const Uint8 *state, const Uin
         return -1;
     }
 
-    bool shift = 1 <= state[SDL_SCANCODE_LSHIFT] + state[SDL_SCANCODE_RSHIFT];
-    bool   alt = 1 <= state[SDL_SCANCODE_LALT] + state[SDL_SCANCODE_RALT];
+    if (state[SDL_SCANCODE_TAB] == 1 && last_state[SDL_SCANCODE_TAB] != 1)
+    {
+        printf("\n");
+        for (int i = 0; i < m_count; i++)
+        {
+            printf("%-18s : ", mappings[i].name);
+
+            switch (mappings[i].incr_type)
+            {
+            case CONTINUOUS:
+                printf("%6.2f", *(float*)mappings[i].ptr);
+                break;
+
+            case STEPWISE:
+                printf("%6d", (int)(*(float*)mappings[i].ptr));
+                break;
+
+            case TOGGLE:
+                printf("%6s", *(float*)mappings[i].ptr == 0.0f ? "false" : "true");
+                break;
+            }
+            printf("\n");
+        }
+        printf("\n");
+        return 0;
+    }
+
+
     bool    up = 1 == state[SDL_SCANCODE_UP];
     bool  down = 1 == state[SDL_SCANCODE_DOWN];
+    bool   lup = 1 == last_state[SDL_SCANCODE_UP];
+    bool ldown = 1 == last_state[SDL_SCANCODE_DOWN];
     bool  mult = 1 == state[SDL_SCANCODE_M];
+    bool shift = 1 <= state[SDL_SCANCODE_LSHIFT] + state[SDL_SCANCODE_RSHIFT];
+    bool   alt = 1 <= state[SDL_SCANCODE_LALT] + state[SDL_SCANCODE_RALT];
 
-    const Key_Var_Pair f_pairs[] = {
-        // Full image scan visualization.
-        { "visualize", &fmt->visualize, SDL_SCANCODE_Q, 1.0f },
-        // Visualize total strength as greyscale or individual hsv strengths as rgb.
-        { "greyscale", &fmt->greyscale, SDL_SCANCODE_W, 1.0f },
-        // Dot detection threshold.
-        { "dot_threshold", &fmt->dot_threshold, SDL_SCANCODE_E, 0.2f },
-
-        // Enables skipping pixels based on initial color-matching.
-        // Warning: lowering these can severely impact performance.
-        { "filter_hue", &fmt->filter_hue, SDL_SCANCODE_R, 0.05f },
-        { "filter_sat", &fmt->filter_sat, SDL_SCANCODE_T, 0.05f },
-        { "filter_val", &fmt->filter_val, SDL_SCANCODE_Y, 0.05f },
-
-        // Radius of surrounding pixel scan.
-        { "scan_rad", &fmt->scan_rad, SDL_SCANCODE_A, 0.2f },
-        // Skip length after detecting valid pixel.
-        { "skip_len", &fmt->skip_len, SDL_SCANCODE_S, 0.2f },
-        // The minimal distance between each pixel sampled within scan_rad.
-        { "sample_step", &fmt->sample_step, SDL_SCANCODE_D, 0.2f },
-
-        // Interpolates between a new and old method of weighing hue.
-        { "old_h", &fmt->old_h, SDL_SCANCODE_F, 0.1f },
-
-        // HSV detection weights.
-        { "h_str", &fmt->h_str, SDL_SCANCODE_Z, 0.1f },
-        { "s_str", &fmt->s_str, SDL_SCANCODE_X, 0.1f },
-        { "v_str", &fmt->v_str, SDL_SCANCODE_C, 0.1f }
-    };
-
-    for (int i = 0; i < sizeof(f_pairs) / sizeof(Key_Var_Pair); i++)
+    for (int i = 0; i < m_count; i++)
     {
-        if (state[f_pairs[i].SDL_key] == 1)
-        {
-            float last_val = *(float*)f_pairs[i].ptr;
+        if (state[mappings[i].SDL_key] != 1)
+            continue;
 
-            if (last_state[f_pairs[i].SDL_key] != 1)
-                printf("%s: %.2f\n", f_pairs[i].name, last_val);
+        float last_val = *(float*)mappings[i].ptr;
+
+        switch (mappings[i].incr_type)
+        {
+        case CONTINUOUS:
+            if (last_state[mappings[i].SDL_key] != 1)
+                printf("%s: %.2f\n", mappings[i].name, last_val);
 
             if (mult)
             {
-                if (up)         *(float*)f_pairs[i].ptr *= (shift ? 1.25f : (alt ? 1.01f : 1.05f));
-                else if (down)  *(float*)f_pairs[i].ptr *= (shift ? 0.8f : (alt ? 0.99f : 0.95f));
+                if      (up)   *(float*)mappings[i].ptr *= (shift ? 1.25f : (alt ? 1.01f : 1.05f));
+                else if (down) *(float*)mappings[i].ptr *= (shift ? 0.8f : (alt ? 0.99f : 0.95f));
             }
             else
             {
-                if (up)         *(float*)f_pairs[i].ptr += f_pairs[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
-                else if (down)  *(float*)f_pairs[i].ptr -= f_pairs[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
+                if (up)         *(float*)mappings[i].ptr += mappings[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
+                else if (down)  *(float*)mappings[i].ptr -= mappings[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
             }
 
-            *(float*)f_pairs[i].ptr = MAX(0.0f, *(float*)f_pairs[i].ptr);
+            *(float*)mappings[i].ptr = MAX(0.0f, *(float*)mappings[i].ptr);
+
+            if (*(float*)mappings[i].ptr != last_val)
+                printf("%s: %.2f\n", mappings[i].name, *(float*)mappings[i].ptr);
+            break;
+
+        case STEPWISE:
+            if (last_state[mappings[i].SDL_key] != 1)
+                printf("%s: %.2f\n", mappings[i].name, last_val);
+
+            if      (up && !lup)     *(float*)mappings[i].ptr += mappings[i].step;
+            else if (down && !ldown) *(float*)mappings[i].ptr -= mappings[i].step;
+
+            *(float*)mappings[i].ptr = MAX(0.0f, *(float*)mappings[i].ptr);
             
-            if (*(float*)f_pairs[i].ptr != last_val)
-                printf("%s: %.2f\n", f_pairs[i].name, *(float*)f_pairs[i].ptr);
+            if (*(float*)mappings[i].ptr != last_val)
+                printf("%s: %.2f\n", mappings[i].name, *(float*)mappings[i].ptr);
+            break;
+
+        case TOGGLE:
+            if (last_state[mappings[i].SDL_key] != 1)
+            {
+                *(float*)mappings[i].ptr = fmodf(*(float*)mappings[i].ptr + 1.0f, 2.0f);
+                printf("%s: %s\n", mappings[i].name, ((*(float*)mappings[i].ptr == 0.0f) ? "false" : "true"));
+            }
+            break;
         }
     }
     return 0;
@@ -237,45 +272,62 @@ int start_snatching()
         .height = IMG_HEIGHT,
         .size = IMG_SIZE,
 
-
-        .visualize = 1.0f,
-        .greyscale = 6.0f,
-        .dot_threshold = 0.0f,
+        .visualize = 0.0f,
+        .greyscale = 0.0f,
+        .verbose = 0.0f,
 
         .filter_hue = 0.99f,
         .filter_sat = 0.99f,
         .filter_val = 0.99f,
 
-        .scan_rad = 2.0f,
-        .skip_len = 0.0f,
-        .sample_step = 0.0f,
+        .scan_rad = 2.0f, // IMG_HEIGHT / 25.0f
+        .skip_len = 0.0f, // 1.0f
+        .sample_step = 0.0f, // 3.0f
 
-        .old_h = 0.0f,
-
-        .h_str = 1.0f,
-        .s_str = 0.0f,
-        .v_str = 0.0f
-
-        /*
-        .visualize = 1.0f,
-        .greyscale = 0.0f,
-        .filter_white = 1.0f,
-
-        .dot_threshold = 8.0f,
-        .old_h = 0.0f,
-
-        .scan_rad = IMG_HEIGHT / 25.0f,
-        .skip_len = 1.0f,
-        .sample_step = 3.0f,
-        
+        .dot_threshold = 0.0f, // 8.0f
+        .alt_weights = 0.0f,
 
         .h_str = 1.0f,
         .s_str = 1.0f,
         .v_str = 1.0f
-        */
     };
 
-    if (webcam_init(&fmt) == -1) return -1;
+    const Key_Mapping mappings[] = {
+        // Full image scan visualization.
+        { &fmt.visualize, "[B] visualize", SDL_SCANCODE_Q, TOGGLE },
+        // Visualize total strength as greyscale or individual hsv strengths as rgb.
+        { &fmt.greyscale, "[B] greyscale", SDL_SCANCODE_W, TOGGLE },
+        // Toggle verbose dot detection output.
+        { &fmt.verbose, "[B] verbose", SDL_SCANCODE_E, TOGGLE },
+
+        // Enables skipping pixels based on initial color-matching.
+        // Warning: lowering these can severely impact performance.
+        { &fmt.filter_hue, "[F] filter_hue", SDL_SCANCODE_R, CONTINUOUS, 0.05f },
+        { &fmt.filter_sat, "[F] filter_sat", SDL_SCANCODE_T, CONTINUOUS, 0.05f },
+        { &fmt.filter_val, "[F] filter_val", SDL_SCANCODE_Y, CONTINUOUS, 0.05f },
+
+        // Radius of surrounding pixel scan.
+        { &fmt.scan_rad, "[F] scan_rad", SDL_SCANCODE_A, CONTINUOUS, 0.2f },
+        // Skip length after detecting valid pixel.
+        { &fmt.skip_len, "[I] skip_len", SDL_SCANCODE_S, STEPWISE, 1.0f },
+        // The minimal distance between each pixel sampled within scan_rad.
+        { &fmt.sample_step, "[I] sample_step", SDL_SCANCODE_D, STEPWISE, 1.0f },
+
+        // Dot detection threshold.
+        { &fmt.dot_threshold, "[F] dot_threshold", SDL_SCANCODE_F, CONTINUOUS, 0.2f },
+        // Interpolates between two methods of weighing HSV weights.
+        { &fmt.alt_weights, "[F] alt_weights", SDL_SCANCODE_G, CONTINUOUS, 0.1f },
+
+        // HSV detection weights.
+        { &fmt.h_str, "[F] h_str", SDL_SCANCODE_Z, CONTINUOUS, 0.1f },
+        { &fmt.s_str, "[F] s_str", SDL_SCANCODE_X, CONTINUOUS, 0.1f },
+        { &fmt.v_str, "[F] v_str", SDL_SCANCODE_C, CONTINUOUS, 0.1f }
+    };
+    int m_count = sizeof(mappings) / sizeof(Key_Mapping);
+
+
+    if (webcam_init(&fmt) == -1) 
+        return -1;
 
     printf("\nOpening Window...\n");
     if (SDL_Init(SDL_INIT_VIDEO) < 0) 
@@ -323,7 +375,7 @@ int start_snatching()
             last_state[i] = state[i];
         SDL_PumpEvents();
 
-        if (handle_keypresses(&fmt, key_count, state, last_state) == -1)
+        if (handle_keypresses(&fmt, mappings, m_count, state, last_state) == -1)
             escape = true;
 
 
