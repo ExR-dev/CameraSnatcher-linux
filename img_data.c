@@ -1,6 +1,4 @@
 
-#define USE_THREADS
-
 #include "include/img_data.h"
 
 #include <math.h>
@@ -117,7 +115,6 @@ float color_magnitude_sqr(RGB col1, RGB col2)
 
 float color_distance(RGB col1, RGB col2)
 {
-
     float r_dist = fabsf(col1.R - col2.R);
     float g_dist = fabsf(col1.G - col2.G);
     float b_dist = fabsf(col1.B - col2.B);

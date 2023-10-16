@@ -1,7 +1,6 @@
 #ifndef INCLUDE_IMG_DATA_H
 #define INCLUDE_IMG_DATA_H
 
-
 #include <stdbool.h>
 
 
@@ -19,13 +18,14 @@ typedef struct Img_Fmt
 {
     const unsigned int width, height, size;
 
-    float 
+    float // Settings
         visualize, greyscale, verbose,
         filter_hue, filter_sat, filter_val,
         scan_rad, skip_len, sample_step,
-        dot_threshold, alt_weights,
-        h_str, s_str, v_str;
-
+        dot_threshold, alt_weights, 
+        h_str, s_str, v_str,
+        h_white_penalty, h_white_falloff, h_white_curve,
+        compare_threading, thread_count;
 } Img_Fmt;
 
 typedef struct RGB

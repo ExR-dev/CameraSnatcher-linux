@@ -1,14 +1,11 @@
-// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c input_handler.c -o release -O0 -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // valgrind --leak-check=full --track-origins=yes -s ./release
 
-// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c webcam_handler.c img_processing.c input_handler.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
-// gcc main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
+// gcc main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c input_handler.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
-
-
-#define USE_THREADS
 
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -18,6 +15,7 @@
 #include "include/webcam_handler.h"
 #include "include/img_processing.h"
 #include "include/aabb.h"
+#include "include/input_handler.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,28 +27,9 @@
 #include <pthread.h>
 
 
-#define var_name(var) #var
-
-#define IMG_WIDTH 320 // 320 640 800 1280
-#define IMG_HEIGHT 240 // 240 480 600 720
+#define IMG_WIDTH 640 // 320 640 800 1280
+#define IMG_HEIGHT 480 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
-
-
-typedef enum Increment_Type
-{
-    CONTINUOUS,
-    STEPWISE,
-    TOGGLE
-} Increment_Type;
-
-typedef struct Key_Mapping
-{
-    void *ptr;
-    char *name;
-    int SDL_key;
-    Increment_Type incr_type;
-    float step;
-} Key_Mapping;
 
 
 typedef struct Save_Img_Thread_Data
@@ -73,15 +52,22 @@ int process_image(const Img_Fmt *fmt, RGB *rgb)
     if (result == -1)
         return -1;
 
-    if (fmt->verbose == 1.0f)
+    if (fmt->visualize == 1.0f)
+    {
+        result = apply_img_effects(fmt, rgb);
+        if (result == -1)
+            return -1;
+    }
+    else
     {
         Vec2 dot_pos;
         float confidence = 0.0f;
+        
         result = find_laser_dot(fmt, rgb, &dot_pos, &confidence);
-        confidence -= fmt->dot_threshold;
 
+        confidence -= fmt->dot_threshold;
         if (confidence > 0)
-            draw_circle(fmt, rgb, dot_pos, 10, CLAMP((int)(log2f(confidence + 1.0f)), 1, 10), (RGB){0,0,255});
+            draw_circle(fmt, rgb, dot_pos, 10, CLAMP((int)(log2f(confidence + 1.0f)) + confidence / 10.0f, 1, 50), (RGB){0,0,255});
 
         AABB 
             left_select = (AABB){0, 0, fmt->width/5, fmt->height},
@@ -100,48 +86,22 @@ int process_image(const Img_Fmt *fmt, RGB *rgb)
         draw_box(fmt, rgb, fwd_select, 1, go_fwd ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
         draw_box(fmt, rgb, back_select, 1, go_back ? (RGB){0, 255, 0} : (RGB){255, 0, 0});
 
-        if (go_left)
-            printf("Turning left...");
-        else if (go_right)
-            printf("Turning right...");
-        else if (go_fwd)
-            printf("Going forward...");
-        else if (go_back)
-            printf("Going back...");
-        else
-            printf("Idling...");
-        printf("\n");
-    }
-    else
-    {
-        result = apply_img_effects(fmt, rgb);
-        if (result == -1)
-            return -1;
+        if (fmt->verbose == 1.0f)
+        {
+            if (go_left)
+                printf("Turning left...");
+            else if (go_right)
+                printf("Turning right...");
+            else if (go_fwd)
+                printf("Going forward...");
+            else if (go_back)
+                printf("Going back...");
+            else
+                printf("Idling...");
+            printf("\n");
+        }
     }
     
-    return 0;
-}
-
-int save_png(RGB *rgb, char *name)
-{
-    char *file_name = malloc(strlen(name) + strlen(".png") + 1);
-
-    // Append the extension to the filename.
-    strcpy(file_name, name);
-    strcat(file_name, ".png");
-
-    int write_result = stbi_write_png(file_name, 
-        IMG_WIDTH, IMG_HEIGHT, 
-        3, rgb, IMG_WIDTH * 3);
-
-    free(file_name);
-
-    if (write_result != 1)
-    {
-        printf("ERROR: stbi_write_png returned %d, expected 1.\n", write_result);
-        return -1;
-    }
-
     return 0;
 }
 
@@ -150,122 +110,30 @@ void *threaded_save_png(void *input)
     Save_Img_Thread_Data t_data = *(Save_Img_Thread_Data*)input;
 
     // Get the length of the indexed name using snprintf.
-    int name_length = snprintf(NULL, 0, "Frame %d", t_data.frame_num);
+    int name_length = snprintf(NULL, 0, "Frame %d.png", t_data.frame_num);
+
     // Write the name to a string using sprintf.
     char *img_name = malloc(name_length + 1);
-    sprintf(img_name, "Frame %d", t_data.frame_num);
+    sprintf(img_name, "Frame %d.png", t_data.frame_num);
 
-    int save_result = save_png(t_data.rgb_copy, img_name);
-    
+    int write_result = stbi_write_png(img_name, 
+        IMG_WIDTH, IMG_HEIGHT, 
+        3, t_data.rgb_copy, IMG_WIDTH * 3);
     free(img_name);
     free(t_data.rgb_copy);
 
-    printf("Frame %d Captured. (out: %d)\n", t_data.frame_num, save_result);
+    if (write_result != 1)
+    {
+        printf("ERROR: stbi_write_png returned %d, expected 1.\n", write_result);
+        return NULL;
+    }
+
+    printf("Frame %d Captured.\n", t_data.frame_num);
     return NULL;
 }
 
 
-int handle_keypresses(Img_Fmt *fmt, const Key_Mapping mappings[], int m_count, const Uint8 *state, const Uint8 *last_state)
-{
-    if (state[SDL_SCANCODE_ESCAPE] == 1)
-    {
-        printf("Pressed escape.\n");
-        return -1;
-    }
-
-    if (state[SDL_SCANCODE_TAB] == 1 && last_state[SDL_SCANCODE_TAB] != 1)
-    {
-        printf("\n");
-        for (int i = 0; i < m_count; i++)
-        {
-            printf("%-18s : ", mappings[i].name);
-
-            switch (mappings[i].incr_type)
-            {
-            case CONTINUOUS:
-                printf("%6.2f", *(float*)mappings[i].ptr);
-                break;
-
-            case STEPWISE:
-                printf("%6d", (int)(*(float*)mappings[i].ptr));
-                break;
-
-            case TOGGLE:
-                printf("%6s", *(float*)mappings[i].ptr == 0.0f ? "false" : "true");
-                break;
-            }
-            printf("\n");
-        }
-        printf("\n");
-        return 0;
-    }
-
-
-    bool    up = 1 == state[SDL_SCANCODE_UP];
-    bool  down = 1 == state[SDL_SCANCODE_DOWN];
-    bool   lup = 1 == last_state[SDL_SCANCODE_UP];
-    bool ldown = 1 == last_state[SDL_SCANCODE_DOWN];
-    bool  mult = 1 == state[SDL_SCANCODE_M];
-    bool shift = 1 <= state[SDL_SCANCODE_LSHIFT] + state[SDL_SCANCODE_RSHIFT];
-    bool   alt = 1 <= state[SDL_SCANCODE_LALT] + state[SDL_SCANCODE_RALT];
-
-    for (int i = 0; i < m_count; i++)
-    {
-        if (state[mappings[i].SDL_key] != 1)
-            continue;
-
-        float last_val = *(float*)mappings[i].ptr;
-
-        switch (mappings[i].incr_type)
-        {
-        case CONTINUOUS:
-            if (last_state[mappings[i].SDL_key] != 1)
-                printf("%s: %.2f\n", mappings[i].name, last_val);
-
-            if (mult)
-            {
-                if      (up)   *(float*)mappings[i].ptr *= (shift ? 1.25f : (alt ? 1.01f : 1.05f));
-                else if (down) *(float*)mappings[i].ptr *= (shift ? 0.8f : (alt ? 0.99f : 0.95f));
-            }
-            else
-            {
-                if (up)         *(float*)mappings[i].ptr += mappings[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
-                else if (down)  *(float*)mappings[i].ptr -= mappings[i].step * (shift ? 10.0f : (alt ? 0.1f : 1.0f));
-            }
-
-            *(float*)mappings[i].ptr = MAX(0.0f, *(float*)mappings[i].ptr);
-
-            if (*(float*)mappings[i].ptr != last_val)
-                printf("%s: %.2f\n", mappings[i].name, *(float*)mappings[i].ptr);
-            break;
-
-        case STEPWISE:
-            if (last_state[mappings[i].SDL_key] != 1)
-                printf("%s: %.2f\n", mappings[i].name, last_val);
-
-            if      (up && !lup)     *(float*)mappings[i].ptr += mappings[i].step;
-            else if (down && !ldown) *(float*)mappings[i].ptr -= mappings[i].step;
-
-            *(float*)mappings[i].ptr = MAX(0.0f, *(float*)mappings[i].ptr);
-            
-            if (*(float*)mappings[i].ptr != last_val)
-                printf("%s: %.2f\n", mappings[i].name, *(float*)mappings[i].ptr);
-            break;
-
-        case TOGGLE:
-            if (last_state[mappings[i].SDL_key] != 1)
-            {
-                *(float*)mappings[i].ptr = fmodf(*(float*)mappings[i].ptr + 1.0f, 2.0f);
-                printf("%s: %s\n", mappings[i].name, ((*(float*)mappings[i].ptr == 0.0f) ? "false" : "true"));
-            }
-            break;
-        }
-    }
-    return 0;
-}
-
-
-int start_snatching()
+int start_snatching(int argc, const char *argv[])
 {
     Img_Fmt fmt = (Img_Fmt){ 
         .width = IMG_WIDTH,
@@ -276,55 +144,99 @@ int start_snatching()
         .greyscale = 0.0f,
         .verbose = 0.0f,
 
-        .filter_hue = 0.99f,
-        .filter_sat = 0.99f,
+        .filter_hue = 0.98f,
+        .filter_sat = 0.97f,
         .filter_val = 0.99f,
 
-        .scan_rad = 2.0f, // IMG_HEIGHT / 25.0f
-        .skip_len = 0.0f, // 1.0f
-        .sample_step = 0.0f, // 3.0f
+        .scan_rad = MAX(1.2f, IMG_HEIGHT / 80.0f),
+        .skip_len = 0.0f, //2
+        .sample_step = 0.0f, //2
 
-        .dot_threshold = 0.0f, // 8.0f
+        .dot_threshold = 0.4f,
         .alt_weights = 0.0f,
 
         .h_str = 1.0f,
         .s_str = 1.0f,
-        .v_str = 1.0f
+        .v_str = 1.0f,
+
+        .h_white_penalty = 0.95f,
+        .h_white_falloff = 0.90f,
+        .h_white_curve = 1.0f,
+
+        .compare_threading = 1.0f, //0.0f,
+        .thread_count = 4.0f,
     };
 
     const Key_Mapping mappings[] = {
         // Full image scan visualization.
-        { &fmt.visualize, "[B] visualize", SDL_SCANCODE_Q, TOGGLE },
+        { &fmt.visualize, "visualize", SDL_SCANCODE_Q, TOGGLE },
         // Visualize total strength as greyscale or individual hsv strengths as rgb.
-        { &fmt.greyscale, "[B] greyscale", SDL_SCANCODE_W, TOGGLE },
+        { &fmt.greyscale, "greyscale", SDL_SCANCODE_W, TOGGLE },
         // Toggle verbose dot detection output.
-        { &fmt.verbose, "[B] verbose", SDL_SCANCODE_E, TOGGLE },
+        { &fmt.verbose, "verbose", SDL_SCANCODE_E, TOGGLE },
 
         // Enables skipping pixels based on initial color-matching.
         // Warning: lowering these can severely impact performance.
-        { &fmt.filter_hue, "[F] filter_hue", SDL_SCANCODE_R, CONTINUOUS, 0.05f },
-        { &fmt.filter_sat, "[F] filter_sat", SDL_SCANCODE_T, CONTINUOUS, 0.05f },
-        { &fmt.filter_val, "[F] filter_val", SDL_SCANCODE_Y, CONTINUOUS, 0.05f },
+        { &fmt.filter_hue, "filter_hue", SDL_SCANCODE_R, CONTINUOUS, 0.05f },
+        { &fmt.filter_sat, "filter_sat", SDL_SCANCODE_T, CONTINUOUS, 0.05f },
+        { &fmt.filter_val, "filter_val", SDL_SCANCODE_Y, CONTINUOUS, 0.05f },
 
         // Radius of surrounding pixel scan.
-        { &fmt.scan_rad, "[F] scan_rad", SDL_SCANCODE_A, CONTINUOUS, 0.2f },
+        { &fmt.scan_rad, "scan_rad", SDL_SCANCODE_A, CONTINUOUS, 0.2f },
         // Skip length after detecting valid pixel.
-        { &fmt.skip_len, "[I] skip_len", SDL_SCANCODE_S, STEPWISE, 1.0f },
+        { &fmt.skip_len, "skip_len", SDL_SCANCODE_S, STEPWISE, 1.0f },
         // The minimal distance between each pixel sampled within scan_rad.
-        { &fmt.sample_step, "[I] sample_step", SDL_SCANCODE_D, STEPWISE, 1.0f },
+        { &fmt.sample_step, "sample_step", SDL_SCANCODE_D, STEPWISE, 1.0f },
 
         // Dot detection threshold.
-        { &fmt.dot_threshold, "[F] dot_threshold", SDL_SCANCODE_F, CONTINUOUS, 0.2f },
-        // Interpolates between two methods of weighing HSV weights.
-        { &fmt.alt_weights, "[F] alt_weights", SDL_SCANCODE_G, CONTINUOUS, 0.1f },
+        { &fmt.dot_threshold, "dot_threshold", SDL_SCANCODE_F, CONTINUOUS, 0.2f },
+        // Interpolates between two methods of calculating HSV weights.
+        { &fmt.alt_weights, "alt_weights", SDL_SCANCODE_G, CONTINUOUS, 0.1f },
 
         // HSV detection weights.
-        { &fmt.h_str, "[F] h_str", SDL_SCANCODE_Z, CONTINUOUS, 0.1f },
-        { &fmt.s_str, "[F] s_str", SDL_SCANCODE_X, CONTINUOUS, 0.1f },
-        { &fmt.v_str, "[F] v_str", SDL_SCANCODE_C, CONTINUOUS, 0.1f }
+        { &fmt.h_str, "h_str", SDL_SCANCODE_Z, CONTINUOUS, 0.1f },
+        { &fmt.s_str, "s_str", SDL_SCANCODE_X, CONTINUOUS, 0.1f },
+        { &fmt.v_str, "v_str", SDL_SCANCODE_C, CONTINUOUS, 0.1f },
+
+        // Determines the impact of whites & blacks on the hue weights.
+        // Used to penalize overexposed regions.
+        { &fmt.h_white_penalty, "h_white_penalty", SDL_SCANCODE_V, CONTINUOUS, 0.05f },
+        { &fmt.h_white_falloff, "h_white_falloff", SDL_SCANCODE_B, CONTINUOUS, 0.05f },
+        { &fmt.h_white_curve, "h_white_curve", SDL_SCANCODE_N, CONTINUOUS, 0.05f },
+
+        { &fmt.compare_threading, "compare_threading", SDL_SCANCODE_M, TOGGLE },
+        { &fmt.thread_count, "thread_count", SDL_SCANCODE_COMMA, STEPWISE, 1.0f },
     };
     int m_count = sizeof(mappings) / sizeof(Key_Mapping);
 
+    for (int i = 0; i < argc; i++)
+    {
+        int equals_index;
+        for (equals_index = 0; ; equals_index++)
+        {
+            if (argv[i][equals_index] == '\0')
+                goto next_arg;
+
+            if (argv[i][equals_index] == '=')
+                break;
+        }
+
+        for (int j = 0; j < m_count; j++)
+        {
+            for (int c = 0; c < equals_index; c++)
+            {
+                if (mappings[j].name[c] != argv[i][c])
+                    goto next_mapping;
+            }
+
+            *(float*)mappings[j].ptr = (float)atof(&argv[i][equals_index + 1]);
+            printf("%s: %.2f\n", mappings[j].name, *(float*)mappings[j].ptr);
+
+        next_mapping:
+        }
+    next_arg:
+    }
+    
 
     if (webcam_init(&fmt) == -1) 
         return -1;
@@ -365,7 +277,7 @@ int start_snatching()
     unsigned char img_num = 0;
     bool escape = false;
 
-    printf("\n{\n");
+    printf("{\n");
     timer_init();
     while (!escape)
     {
@@ -375,7 +287,7 @@ int start_snatching()
             last_state[i] = state[i];
         SDL_PumpEvents();
 
-        if (handle_keypresses(&fmt, mappings, m_count, state, last_state) == -1)
+        if (handle_keypresses(mappings, m_count, state, last_state) == 1)
             escape = true;
 
 
@@ -463,15 +375,16 @@ int start_snatching()
 }
 
 
-int main(int argc, const char** argv)
+int main(int argc, const char *argv[])
 {     
-    printf("\n======Start============\n");
-    int handlerOut = start_snatching();
-    printf("\n======Quit=============\n");
+    printf("\n======Start=====================\n");
+    int handlerOut = start_snatching(argc, argv);
+    printf("\n======Quit======================\n");
 
+    printf("\n------Out-----------------------\n");
     timer_conclude();
+    printf("\nHandler Output: %i\n", handlerOut);
+    printf("--------------------------------\n\n");
 
-    printf("Handler Output: %i\n", handlerOut);
-    printf("=======================\n");
     return handlerOut;
 }

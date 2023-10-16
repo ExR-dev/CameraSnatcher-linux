@@ -72,7 +72,9 @@
     "pthread.h": "c",
     "img_processing.h": "c",
     "omp.h": "c",
-    "aabb.h": "c"
+    "aabb.h": "c",
+    "timer.h": "c",
+    "input_handler.h": "c"
   },
   "C_Cpp.dimInactiveRegions": false
 }

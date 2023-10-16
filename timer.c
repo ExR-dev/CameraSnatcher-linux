@@ -8,7 +8,8 @@
 #include <omp.h>
 
 
-#define TIMED_FRAMES 256
+#define TIMED_FRAMES 512
+
 
 typedef struct Timer_Data
 {
