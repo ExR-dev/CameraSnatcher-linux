@@ -369,8 +369,9 @@ int start_snatching(int argc, const char *argv[])
         printf("ERROR: %s\n", SDL_GetError());
         return -1;
     }
-
     SDL_Quit();
+
+    webcam_close(&fmt);
     return 0;
 }
 

@@ -7,7 +7,11 @@
 int webcam_init(const Img_Fmt *format);
 
 int next_frame();
+
 int get_frame(unsigned char **mjpeg, unsigned int *mjpeg_size);
+
 int close_frame();
+
+int webcam_close(const Img_Fmt *format);
 
 #endif

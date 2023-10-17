@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include <linux/videodev2.h>
 
@@ -207,4 +208,14 @@ int close_frame()
         return -1;
 
     return 0;
+}
+
+
+int webcam_close(const Img_Fmt *format)
+{
+    if (close(capture_data.handle) == -1) 
+        return -1;
+        
+    munmap(capture_data.img_mem[0]);
+    munmap(capture_data.img_mem[1]);
 }
