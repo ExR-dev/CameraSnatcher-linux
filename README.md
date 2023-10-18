@@ -4,11 +4,12 @@ School project: A program for linux written in C that reads camera data and scan
 
 Info:
     [Q]-[Y], [A]-[H], [Z]-[,] can be used to change settings.
+    [Space] Captures and saves the current frame to a file.
     [Tab] prints the name and value of all settings.
     [Esc] closes out of the program.
 
     Pressing a key will print it's name and value.
-    If it is a bool it will also switch states on being pressed.
+    If it is a bool it will also switch states upon being pressed.
     If it is a float you can change it by pressing [Arr.Up]/[Arr.Down] while the key is held.
 
     These settings can also be set using command-line arguments following the format [name]=[float].
