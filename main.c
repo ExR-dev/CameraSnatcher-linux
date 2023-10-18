@@ -4,9 +4,6 @@
 // gcc -Wall -g main.c jpegutils.c timer.c img_data.c aabb.c webcam_handler.c img_processing.c input_handler.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
 // ./release
 
-// gcc main.c jpegutils.c timer.c img_data.c aabb.c  webcam_handler.c img_processing.c input_handler.c -o release -ljpeg -lm -lSDL2 -fopenmp -lpthread
-// ./release
-
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "include/stb_image_write.h"
@@ -30,13 +27,6 @@
 #define IMG_WIDTH 640 // 320 640 800 1280
 #define IMG_HEIGHT 480 // 240 480 600 720
 #define IMG_SIZE IMG_WIDTH * IMG_HEIGHT
-
-
-typedef struct Save_Img_Thread_Data
-{
-    unsigned int frame_num;
-    RGB *rgb_copy;
-} Save_Img_Thread_Data;
 
 
 int process_image(const Img_Fmt *fmt, RGB *rgb)
@@ -105,22 +95,32 @@ int process_image(const Img_Fmt *fmt, RGB *rgb)
     return 0;
 }
 
+
+typedef struct Save_Img_Thread_Data
+{
+    pthread_t identifier;
+    bool complete;
+
+    RGB rgb_copy[IMG_SIZE];
+    unsigned int frame_num;
+} Save_Img_Thread_Data;
+
 void *threaded_save_png(void *input)
 {
-    Save_Img_Thread_Data t_data = *(Save_Img_Thread_Data*)input;
-
+    Save_Img_Thread_Data *t_data = (Save_Img_Thread_Data*)input;
+    
     // Get the length of the indexed name using snprintf.
-    int name_length = snprintf(NULL, 0, "Frame %d.png", t_data.frame_num);
+    int name_length = snprintf(NULL, 0, "Frame %d.png", t_data->frame_num);
 
     // Write the name to a string using sprintf.
-    char *img_name = malloc(name_length + 1);
-    sprintf(img_name, "Frame %d.png", t_data.frame_num);
+    char img_name[name_length];
+    sprintf(img_name, "Frame %d.png", t_data->frame_num);
 
     int write_result = stbi_write_png(img_name, 
         IMG_WIDTH, IMG_HEIGHT, 
-        3, t_data.rgb_copy, IMG_WIDTH * 3);
-    free(img_name);
-    free(t_data.rgb_copy);
+        3, t_data->rgb_copy, IMG_WIDTH * 3);
+
+    t_data->complete = true;
 
     if (write_result != 1)
     {
@@ -128,7 +128,7 @@ void *threaded_save_png(void *input)
         return NULL;
     }
 
-    printf("Frame %d Captured.\n", t_data.frame_num);
+    printf("Frame %d Captured.\n", t_data->frame_num);
     return NULL;
 }
 
@@ -149,8 +149,8 @@ int start_snatching(int argc, const char *argv[])
         .filter_val = 0.99f,
 
         .scan_rad = MAX(1.2f, IMG_HEIGHT / 80.0f),
-        .skip_len = 0.0f, //2
-        .sample_step = 0.0f, //2
+        .skip_len = 1.0f,
+        .sample_step = 0.0f,
 
         .dot_threshold = 0.4f,
         .alt_weights = 0.0f,
@@ -163,7 +163,7 @@ int start_snatching(int argc, const char *argv[])
         .h_white_falloff = 0.90f,
         .h_white_curve = 1.0f,
 
-        .compare_threading = 1.0f, //0.0f,
+        .compare_threading = 1.0f,
         .thread_count = 4.0f,
     };
 
@@ -207,7 +207,8 @@ int start_snatching(int argc, const char *argv[])
         { &fmt.compare_threading, "compare_threading", SDL_SCANCODE_M, TOGGLE },
         { &fmt.thread_count, "thread_count", SDL_SCANCODE_COMMA, STEPWISE, 1.0f },
     };
-    int m_count = sizeof(mappings) / sizeof(Key_Mapping);
+    int mapping_c = sizeof(mappings) / sizeof(Key_Mapping);
+
 
     for (int i = 0; i < argc; i++)
     {
@@ -221,7 +222,7 @@ int start_snatching(int argc, const char *argv[])
                 break;
         }
 
-        for (int j = 0; j < m_count; j++)
+        for (int j = 0; j < mapping_c; j++)
         {
             for (int c = 0; c < equals_index; c++)
             {
@@ -270,28 +271,32 @@ int start_snatching(int argc, const char *argv[])
     }
     
 
-    int key_count = 0;
-    const Uint8 *state = SDL_GetKeyboardState(&key_count);
-    Uint8 *const last_state = malloc(key_count * sizeof(Uint8));
-
+    Save_Img_Thread_Data img_save_th[4];
+    int img_save_c = 0;
     unsigned char img_num = 0;
+
+    int key_c = 0;
+    const Uint8 *state = SDL_GetKeyboardState(&key_c);
+    Uint8 l_state[key_c];
+
     bool escape = false;
 
-    printf("{\n");
     timer_init();
     while (!escape)
     {
         timer_begin_measure(FRAME);
 
-        for (int i = 0; i < key_count; i++)
-            last_state[i] = state[i];
+        // Update last input state & get new input state.
+        for (int i = 0; i < key_c; i++)
+            l_state[i] = state[i];
         SDL_PumpEvents();
 
-        if (handle_keypresses(mappings, m_count, state, last_state) == 1)
+        if (handle_keypresses(mappings, mapping_c, state, l_state) == 1)
             escape = true;
 
-
-        if (next_frame() == -1) return -1;
+        // Update webcam handler.
+        if (next_frame() == -1) 
+            return -1;
 
         void *window_pixels;
         int pitch;
@@ -303,36 +308,65 @@ int start_snatching(int argc, const char *argv[])
 
         // Begin image manipulation.
         timer_begin_measure(MANIPULATION);
+
+        // Create an array and write the current frame's pixel data to it.
         RGB rgb[IMG_SIZE];
         if (process_image(&fmt, rgb) == -1) 
             return -1;
 
-        // Checks if space was pressed this frame
-        if (state[SDL_SCANCODE_SPACE] == 1 && last_state[SDL_SCANCODE_SPACE] == 0)
+        // Checks if space was pressed this frame.
+        if (state[SDL_SCANCODE_SPACE] == 1 && l_state[SDL_SCANCODE_SPACE] == 0)
         {
+            int thread_capacity = sizeof(img_save_th) / sizeof(Save_Img_Thread_Data);
+            int img_save_i = img_save_c++;
+
+            if (img_save_i == thread_capacity)
+            {
+                img_save_c--;
+
+                for (int i = 0; i < thread_capacity; i++)
+                {
+                    if (!img_save_th[i].complete)
+                        continue;
+
+                    img_save_i = i;
+                    break;
+                }
+                
+                if (img_save_i == thread_capacity)
+                {
+                    printf("Thread capacity reached. Saving frame aborted.\n");
+                    goto skip_save;
+                }
+            }
+
             printf("Saving Frame %d...\n", img_num);
 
-            RGB *rgb_copy = malloc(IMG_SIZE * sizeof(RGB));
+            img_save_th[img_save_i] = (Save_Img_Thread_Data){
+                .complete = false,
+                .frame_num = img_num++ 
+            };
+
             for (int i = 0; i < IMG_SIZE; i++)
-                rgb_copy[i] = rgb[i];
+                img_save_th[img_save_i].rgb_copy[i] = rgb[i];
             
-            pthread_t frame_capture_handle;
-            Save_Img_Thread_Data t_data = (Save_Img_Thread_Data){img_num++, rgb_copy};
-            
-            // Create a detached thread that will try to save a copy of the current frame.
-            // Failures are ignored.
-            pthread_create(&frame_capture_handle, NULL, threaded_save_png, &t_data);
-            pthread_detach(frame_capture_handle);
+            // Create a detached thread that tries to save a copy of the current frame.
+            pthread_create(&img_save_th[img_save_i].identifier, NULL, threaded_save_png, &img_save_th[img_save_i]);
+            pthread_detach(img_save_th[img_save_i].identifier);
         }
+    skip_save:
         
+        // Write the pixel data to the window.
         for (int i = 0; i < IMG_SIZE; i++)
         {
             RGB *window_rgb = &((RGB*)window_pixels)[i];
             *window_rgb = rgb[i];
         }
-        timer_end_measure(MANIPULATION); // End image manipulation.
 
+        timer_end_measure(MANIPULATION); 
+        // End image manipulation.
 
+        // Update webcam handler.
         if (close_frame() == -1) 
             return -1;
 
@@ -350,16 +384,24 @@ int start_snatching(int argc, const char *argv[])
 
         SDL_RenderPresent(g_renderer);
 
-        if (timer_end_measure(FRAME) == 1)
-        {
-            //escape = true;
-        }
+        timer_end_measure(FRAME);
     }
     timer_quit();
-    printf("}\n");
 
-    free(last_state);
+    for (int i = 0; i < img_save_c; i++)
+    {
+        bool has_printed = false;
+        while (!img_save_th[i].complete)
+        {
+            if (!has_printed)
+            {
+                printf("Waiting for threads to complete...\n");
+                has_printed = true;
+            }
+        }
+    }
 
+    printf("Closing Window...\n");
     SDL_DestroyRenderer(g_renderer);
     
     SDL_ClearError();
@@ -371,13 +413,26 @@ int start_snatching(int argc, const char *argv[])
     }
     SDL_Quit();
 
+    // Close webcam device.
     webcam_close(&fmt);
     return 0;
 }
 
 
 int main(int argc, const char *argv[])
-{     
+{
+    printf("\nInfo:\n");
+    printf("\t[Q]-[Y], [A]-[H], [Z]-[,] can be used to change settings.\n");
+    printf("\t[Tab] prints the name and value of all settings.\n");
+    printf("\t[Esc] closes out of the program.\n\n");
+
+    printf("\tPressing a key will print it's name and value.\n");
+    printf("\tIf it is a bool it will also switch states on being pressed.\n");
+    printf("\tIf it is a float you can change it by pressing [Arr.Up]/[Arr.Down] while the key is held.\n\n");
+
+    printf("\tThese settings can also be set using command-line arguments following the format [name]=[float].\n");
+    printf("\tFor comments explaining most settings, see the \"mappings\" array.\n\n");
+
     printf("\n======Start=====================\n");
     int handlerOut = start_snatching(argc, argv);
     printf("\n======Quit======================\n");

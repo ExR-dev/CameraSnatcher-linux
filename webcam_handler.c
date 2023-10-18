@@ -213,9 +213,13 @@ int close_frame()
 
 int webcam_close(const Img_Fmt *format)
 {
-    if (close(capture_data.handle) == -1) 
-        return -1;
+    if (close(capture_data.handle) == -1)
+        printf("ERROR: close() returned -1.");
         
-    munmap(capture_data.img_mem[0]);
-    munmap(capture_data.img_mem[1]);
+    if (munmap(capture_data.img_mem[0], v4l2_container.query_buffer.length) == -1)
+        printf("ERROR: munmap() for buffer 0 returned -1.");
+    if (munmap(capture_data.img_mem[1], v4l2_container.query_buffer.length) == -1)
+        printf("ERROR: munmap() for buffer 1 returned -1.");
+
+    return 0;
 }

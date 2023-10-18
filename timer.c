@@ -8,7 +8,7 @@
 #include <omp.h>
 
 
-#define TIMED_FRAMES 512
+#define TIMED_FRAMES 256
 
 
 typedef struct Timer_Data
@@ -231,5 +231,6 @@ int timer_conclude()
 
     printf("Avg. Scan: \nst: %.3f ms\nmt: %.3f ms\n\n", avg_scan_time, avg_t_scan_time);
 
+    printf("(st = single-threaded, mt = multi-threaded)\n");
     return 0;
 }

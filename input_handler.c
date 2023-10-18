@@ -8,7 +8,7 @@
 #include <stdbool.h>
 
 
-int handle_keypresses(const Key_Mapping mappings[], int m_count, const Uint8 *state, const Uint8 *last_state)
+int handle_keypresses(const Key_Mapping mappings[], int m_count, const Uint8 *state, const Uint8 last_state[])
 {
     if (state[SDL_SCANCODE_ESCAPE] == 1)
     {
@@ -22,7 +22,7 @@ int handle_keypresses(const Key_Mapping mappings[], int m_count, const Uint8 *st
         printf("\n");
         for (int i = 0; i < m_count; i++)
         {
-            printf("%-24s : ", mappings[i].name);
+            printf("%-18s : ", mappings[i].name);
 
             switch (mappings[i].incr_type)
             {
